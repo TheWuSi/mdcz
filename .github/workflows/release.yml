@@ -172,8 +172,8 @@ jobs:
           build-args: |
             MDCZ_RELEASE_VERSION=${{ needs.version.outputs.version }}
           tags: |
-            ghcr.io/shotheadman/mdcz:${{ needs.version.outputs.version }}
-            ghcr.io/shotheadman/mdcz:latest
+            ghcr.io/thewusi/mdcz:${{ needs.version.outputs.version }}
+            ghcr.io/thewusi/mdcz:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
