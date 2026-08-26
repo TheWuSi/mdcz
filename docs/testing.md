@@ -177,3 +177,4 @@ The committed checkpoint covers layered Vitest execution, Browser component inte
 * Observe and harden workbench live journeys across network conditions; keep ordinary PR gates offline and the live set at 1+4.
 * Observe and harden Electron smoke across Windows/Linux before expanding its offline workflow coverage.
 * Extend the V8 baseline toward changed-line/workspace-specific policy and add the flaky-test lifecycle.
+fix
