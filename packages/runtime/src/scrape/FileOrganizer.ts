@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { copyFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import type { Configuration } from "@mdcz/shared/config";
@@ -20,6 +20,7 @@ export interface OrganizePlan {
   nfoPath: string;
   strmPath?: string;
   subtitleSidecars?: SubtitleSidecarMatch[];
+  separated?: boolean;
 }
 
 export const resolveMetadataOutputDir = (plan: OrganizePlan): string => plan.metadataDir ?? plan.outputDir;
@@ -61,7 +62,9 @@ export class FileOrganizer {
     const layout = this.namingEngine.buildLayout(fileInfo, data, config, localState);
 
     let outputDir: string;
-    if (config.behavior.successFileMove) {
+    if (config.behavior.fileMode === "separated") {
+      outputDir = resolve(this.resolveMetadataRoot(config), layout.folderRelativePath);
+    } else if (config.behavior.successFileMove) {
       const baseOutput = this.resolveBaseOutput(fileInfo, config, options);
       const sourceDir = resolve(sourceVideo.dir);
       const isAlreadyInOutput =
@@ -73,10 +76,12 @@ export class FileOrganizer {
       outputDir = sourceVideo.dir;
     }
 
+    const separated = config.behavior.fileMode === "separated";
     const targetVideoPath = join(outputDir, layout.targetVideoFileName);
-    const metadataDir = this.resolveMetadataDir(outputDir, config);
+    const metadataDir = separated ? outputDir : this.resolveMetadataDir(outputDir, config);
     const nfoPath = join(metadataDir, layout.nfoFileName);
-    const strmPath = metadataDir === outputDir ? undefined : join(metadataDir, `${parse(targetVideoPath).name}.strm`);
+    const strmPath =
+      separated || metadataDir === outputDir ? undefined : join(metadataDir, `${parse(targetVideoPath).name}.strm`);
 
     return {
       outputDir,
@@ -84,6 +89,7 @@ export class FileOrganizer {
       targetVideoPath,
       nfoPath,
       strmPath,
+      separated,
     };
   }
 
@@ -100,6 +106,13 @@ export class FileOrganizer {
     sourceFilePath: string,
     options: ResolveOutputPlanOptions = {},
   ): Promise<OrganizePlan> {
+    if (isStrmFile(sourceFilePath)) {
+      const sourceTarget = await inspectStrmTarget(sourceFilePath);
+      if (!sourceTarget) {
+        throw new Error(`STRM 文件不包含有效目标：${sourceFilePath}`);
+      }
+    }
+
     if (options.createDirectories) {
       await ensureParentDirectory(plan.targetVideoPath);
       await ensureParentDirectory(plan.nfoPath);
@@ -133,7 +146,7 @@ export class FileOrganizer {
       }
     }
 
-    if (!sameDirectoryOutput) {
+    if (!sameDirectoryOutput && !plan.separated) {
       const stats = await stat(sourceFilePath);
       const diskCheckPath = options.createDirectories
         ? outputRoot
@@ -160,12 +173,19 @@ export class FileOrganizer {
       nfoPath: resolvedPlan.nfoPath ?? plan.nfoPath,
       strmPath: plan.strmPath ? join(metadataDir, `${parse(resolvedPlan.targetVideoPath).name}.strm`) : undefined,
       subtitleSidecars: resolvedPlan.subtitleSidecars,
+      separated: plan.separated,
     };
   }
 
   async organizeVideo(fileInfo: FileInfo, plan: OrganizePlan, config: Configuration): Promise<string> {
     let organizedPath: string;
-    if (!config.behavior.successFileMove) {
+    if (config.behavior.fileMode === "separated") {
+      await ensureParentDirectory(plan.targetVideoPath);
+      organizedPath = await this.fileMover.createSeparatedStrmBundle(fileInfo.filePath, plan.targetVideoPath, {
+        subtitleSidecars: plan.subtitleSidecars,
+        sharedMovieBaseName: parse(plan.nfoPath).name,
+      });
+    } else if (!config.behavior.successFileMove) {
       if (!config.behavior.successFileRename) {
         this.logger.info(`successFileMove disabled; leaving file at ${fileInfo.filePath}`);
         organizedPath = fileInfo.filePath;
@@ -196,6 +216,10 @@ export class FileOrganizer {
   }
 
   async moveToFailedFolder(fileInfo: FileInfo, config: Configuration): Promise<string> {
+    if (config.behavior.fileMode === "separated") {
+      this.logger.info(`Separated mode enabled; leaving failed source at ${fileInfo.filePath}`);
+      return fileInfo.filePath;
+    }
     const mediaRoot = config.paths.mediaPath.trim();
     const base = mediaRoot.length > 0 ? mediaRoot : dirname(fileInfo.filePath);
     const failedDir = resolve(base, config.paths.failedOutputFolder.trim());
@@ -229,19 +253,8 @@ export class FileOrganizer {
       return outputDir;
     }
 
-    const configuredMediaRoot = config.paths.mediaPath.trim();
-    if (!configuredMediaRoot) {
-      throw new Error("配置本地元数据目录时，媒体目录不能为空");
-    }
-    if (!isAbsolute(configuredMediaRoot) || !isAbsolute(configuredMetadataRoot)) {
-      throw new Error("媒体目录和本地元数据目录必须使用绝对路径");
-    }
-
-    const mediaRoot = resolve(configuredMediaRoot);
-    const metadataRoot = resolve(configuredMetadataRoot);
-    if (this.isPathInside(mediaRoot, metadataRoot) || this.isPathInside(metadataRoot, mediaRoot)) {
-      throw new Error("本地元数据目录不能与媒体目录相同或互相包含");
-    }
+    const mediaRoot = this.resolveMediaRoot(config);
+    const metadataRoot = this.resolveMetadataRoot(config);
 
     const outputRelativePath = relative(mediaRoot, resolve(outputDir));
     if (outputRelativePath.startsWith(`..${sep}`) || outputRelativePath === ".." || isAbsolute(outputRelativePath)) {
@@ -249,6 +262,34 @@ export class FileOrganizer {
     }
 
     return resolve(metadataRoot, outputRelativePath);
+  }
+
+  private resolveMediaRoot(config: Configuration): string {
+    const configuredMediaRoot = config.paths.mediaPath.trim();
+    if (!configuredMediaRoot) {
+      throw new Error("配置本地元数据目录时，媒体目录不能为空");
+    }
+    if (!isAbsolute(configuredMediaRoot)) {
+      throw new Error("媒体目录和本地元数据目录必须使用绝对路径");
+    }
+    return resolve(configuredMediaRoot);
+  }
+
+  private resolveMetadataRoot(config: Configuration): string {
+    const configuredMetadataRoot = config.paths.metadataPath.trim();
+    if (!configuredMetadataRoot) {
+      throw new Error("元数据分离模式必须配置本地元数据目录");
+    }
+    if (!isAbsolute(configuredMetadataRoot)) {
+      throw new Error("媒体目录和本地元数据目录必须使用绝对路径");
+    }
+
+    const metadataRoot = resolve(configuredMetadataRoot);
+    const mediaRoot = this.resolveMediaRoot(config);
+    if (this.isPathInside(mediaRoot, metadataRoot) || this.isPathInside(metadataRoot, mediaRoot)) {
+      throw new Error("本地元数据目录不能与媒体目录相同或互相包含");
+    }
+    return metadataRoot;
   }
 
   private isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -262,16 +303,19 @@ export class FileOrganizer {
   }
 
   private async writeMetadataStrm(strmPath: string, organizedVideoPath: string): Promise<void> {
-    let target = resolve(organizedVideoPath);
     if (isStrmFile(organizedVideoPath)) {
       const sourceTarget = await inspectStrmTarget(organizedVideoPath);
       if (!sourceTarget) {
         throw new Error(`STRM 文件不包含有效目标：${organizedVideoPath}`);
       }
-      target = sourceTarget.kind === "url" ? sourceTarget.target : (sourceTarget.resolvedPath ?? sourceTarget.target);
+      await copyFile(organizedVideoPath, strmPath);
+      if (sourceTarget.kind === "relative_path" && sourceTarget.resolvedPath) {
+        await writeStrmTarget(strmPath, sourceTarget.resolvedPath);
+      }
+      return;
     }
 
-    await writeStrmTarget(strmPath, target);
+    await writeStrmTarget(strmPath, resolve(organizedVideoPath));
   }
 
   private isSingleModeOutputDirectory(sourceDir: string, folderRelativePath: string): boolean {

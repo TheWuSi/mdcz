@@ -129,6 +129,51 @@ describe("SceneImageDownloader", () => {
     await expect(access(join(root, "extrafanart", ".scene-set-01-candidate-001.jpg"))).rejects.toThrow();
   });
 
+  it("uses different temporary paths for concurrent downloads into the same scene folder", async () => {
+    const root = await createTempDir();
+    const outputPaths: string[] = [];
+    const downloadValidatedImageCandidate = vi.fn(async (url: string, outputPath: string) => {
+      outputPaths.push(outputPath);
+      return {
+        status: "downloaded" as const,
+        path: await writeSceneCandidate(outputPath, url),
+        width: 1_200,
+        height: 800,
+      };
+    });
+    const downloader = new SceneImageDownloader(
+      { downloadValidatedImageCandidate } as never,
+      {
+        filterUrls: vi.fn((urls: string[]) => urls),
+        shouldSkipUrl: vi.fn(() => false),
+      } as never,
+      { info: vi.fn(), warn: vi.fn() },
+    );
+
+    const [first, second] = await Promise.all([
+      downloader.downloadSceneImageSets({
+        outputDir: root,
+        sceneFolder: "extrafanart",
+        sceneImageSets: [{ urls: ["https://img.example.com/first.jpg"] }],
+        targetSceneCount: 1,
+        maxConcurrent: 1,
+        dedupeAgainstPaths: [],
+      }),
+      downloader.downloadSceneImageSets({
+        outputDir: root,
+        sceneFolder: "extrafanart",
+        sceneImageSets: [{ urls: ["https://img.example.com/second.jpg"] }],
+        targetSceneCount: 1,
+        maxConcurrent: 1,
+        dedupeAgainstPaths: [],
+      }),
+    ]);
+
+    expect(outputPaths).toHaveLength(2);
+    expect(new Set(outputPaths).size).toBe(2);
+    expect(first[0]?.path).not.toBe(second[0]?.path);
+  });
+
   it("warns when every scene image host is cooling down", async () => {
     const logger = { info: vi.fn(), warn: vi.fn() };
     const downloader = new SceneImageDownloader(

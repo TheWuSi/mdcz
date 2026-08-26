@@ -345,6 +345,9 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
   }
 
   private async moveToFailedFolder(fileInfo: FileInfo, config: Configuration): Promise<FileInfo> {
+    if (config.behavior.fileMode === "separated") {
+      return fileInfo;
+    }
     if (!config.behavior.failedFileMove || !(await pathExists(fileInfo.filePath))) {
       return fileInfo;
     }
@@ -494,13 +497,24 @@ export class MountedRootScrapeRuntime {
       }
 
       const outputVideoPath = result.fileInfo.filePath;
-      const stats = await stat(outputVideoPath).catch(() => null);
+      const sourceVideoPath = resolveRootRelativePath(input.root, input.relativePath);
+      let outputRelativePath: string;
+      let statsPath = outputVideoPath;
+      try {
+        outputRelativePath = toRootRelativePath(input.root, outputVideoPath);
+      } catch {
+        // Separated mode writes the playable STRM under the metadata root while
+        // the untouched source media remains the library entry on the media root.
+        outputRelativePath = toRootRelativePath(input.root, sourceVideoPath);
+        statsPath = sourceVideoPath;
+      }
+      const stats = await stat(statsPath).catch(() => null);
       return {
         status: "success",
         result,
         crawlerData: result.crawlerData,
         nfoPath: result.nfoPath ?? null,
-        outputRelativePath: toRootRelativePath(input.root, outputVideoPath),
+        outputRelativePath,
         size: stats?.size ?? 0,
         modifiedAt: stats?.mtime ?? null,
       };

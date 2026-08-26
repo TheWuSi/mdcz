@@ -518,6 +518,12 @@ const RAW_FIELD_REGISTRY: Array<
   { key: "ui.hideMenu", label: "隐藏菜单栏", anchor: "system" },
   { key: "ui.hideWindowButtons", label: "隐藏窗口按钮", anchor: "system" },
   { key: "behavior.successFileMove", label: "成功后移动文件", anchor: "fileBehavior" },
+  {
+    key: "behavior.fileMode",
+    label: "刮削输出模式",
+    anchor: "paths",
+    description: "选择整理源文件，或在独立的本地元数据目录生成 STRM、字幕和刮削结果。",
+  },
   { key: "behavior.failedFileMove", label: "失败后移动文件", anchor: "fileBehavior" },
   { key: "behavior.successFileRename", label: "成功后重命名文件", anchor: "fileBehavior" },
   { key: "behavior.deleteEmptyFolder", label: "删除空文件夹", anchor: "fileBehavior" },

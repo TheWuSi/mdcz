@@ -334,6 +334,61 @@ describe("DownloadManager keep flags", () => {
     expect(networkClient.download).toHaveBeenCalledTimes(2);
   });
 
+  it("finalizes concurrent scene downloads into the same output folder without losing a temporary file", async () => {
+    const root = await createTempDir();
+    const outputPaths: string[] = [];
+    let readyCount = 0;
+    let releaseDownloads: (() => void) | undefined;
+    const downloadsReady = new Promise<void>((resolve) => {
+      releaseDownloads = resolve;
+    });
+    const networkClient = {
+      download: vi.fn(async (url: string, outputPath: string) => {
+        outputPaths.push(outputPath);
+        await writeDownloadedFile(outputPath, url);
+        readyCount += 1;
+        if (readyCount === 2) {
+          releaseDownloads?.();
+        }
+        await downloadsReady;
+        return outputPath;
+      }),
+      probe: vi.fn(),
+    };
+    const imageHostCooldownStore = new PersistentCooldownStore({
+      filePath: join(root, "image-host-cooldowns.json"),
+      loggerName: "ConcurrentSceneDownloadTestStore",
+    });
+    const firstManager = new DownloadManager(networkClient as unknown as RuntimeDownloadNetworkClient, {
+      imageHostCooldownStore,
+    });
+    const secondManager = new DownloadManager(networkClient as unknown as RuntimeDownloadNetworkClient, {
+      imageHostCooldownStore,
+    });
+    mockValid();
+
+    const [firstAssets, secondAssets] = await Promise.all([
+      firstManager.downloadAll(
+        root,
+        createCrawlerData({ scene_images: ["https://first.example.com/scene.jpg"] }),
+        sceneOnly({ keepSceneImages: false }),
+      ),
+      secondManager.downloadAll(
+        root,
+        createCrawlerData({ scene_images: ["https://second.example.com/scene.jpg"] }),
+        sceneOnly({ keepSceneImages: false }),
+      ),
+    ]);
+
+    expect(outputPaths).toHaveLength(2);
+    expect(new Set(outputPaths).size).toBe(2);
+    expect(firstAssets.sceneImages).toEqual([scenePath(root, 1)]);
+    expect(secondAssets.sceneImages).toEqual([scenePath(root, 1)]);
+    await expect(readFile(scenePath(root, 1), "utf8")).resolves.toMatch(
+      /^downloaded:https:\/\/(?:first|second)\.example\.com\/scene\.jpg$/u,
+    );
+  });
+
   it("uses a smaller minimum byte threshold for scene images than primary artwork", async () => {
     const { root, manager } = await createSubject();
     vi.spyOn(imageUtils, "validateImage").mockImplementation(async (_filePath, minBytes = 8192) =>

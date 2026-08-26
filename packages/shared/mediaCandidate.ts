@@ -27,6 +27,11 @@ export const resolveSuccessTargetDir = (scanDir: string, successOutputFolder: st
   return joinHostPath(scanDir, target);
 };
 
+export const resolveWorkbenchTargetDir = (scanDir: string, config?: Configuration): string =>
+  config?.behavior.fileMode === "separated"
+    ? (config.paths.metadataPath?.trim() ?? "")
+    : resolveSuccessTargetDir(scanDir, config?.paths.successOutputFolder);
+
 const resolveConfiguredDir = (scanDir: string, configuredPath: string | undefined): string | undefined => {
   const trimmedPath = configuredPath?.trim() ?? "";
   if (!trimmedPath) {
@@ -102,8 +107,16 @@ export const resolveMediaCandidateScanPlan = (
     config?.behavior?.scrapeSoftlinkPath && scanDir.trim()
       ? resolveConfiguredDir(scanDir, config?.paths?.softlinkPath)
       : undefined;
+  const metadataDirPath =
+    config?.behavior?.fileMode === "separated" ? resolveConfiguredDir(scanDir, config.paths.metadataPath) : undefined;
+  const nestedMetadataDirPath =
+    metadataDirPath &&
+    normalizeComparableHostPath(metadataDirPath) !== normalizeComparableHostPath(scanDir) &&
+    isHostPathWithinDirectory(metadataDirPath, scanDir)
+      ? metadataDirPath
+      : undefined;
 
-  const excludeDirPaths = dedupePathsByComparableKey(defaultExcludeDirPaths);
+  const excludeDirPaths = dedupePathsByComparableKey([...defaultExcludeDirPaths, nestedMetadataDirPath]);
   const extraScanDirs =
     softlinkDirPath && normalizeComparableHostPath(softlinkDirPath) !== normalizeComparableHostPath(scanDir)
       ? [softlinkDirPath]

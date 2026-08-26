@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api, getLibraryAssetSrc } from "../client";
+import { resolveLibraryThumbnailRef } from "../lib/libraryAssets";
 import { queryKeys } from "../lib/queryKeys";
 import { AppLink } from "../routeCommon";
 
@@ -50,7 +51,10 @@ export function LibraryPage() {
         availabilityFilter={availabilityFilter}
         entries={entries}
         errorMessage={libraryQ.error ? toErrorMessage(libraryQ.error) : null}
-        getImageSrc={(path, entry) => getLibraryAssetSrc({ format: "webp", path, rootId: entry.rootId, width: 160 })}
+        getImageSrc={(_path, entry) => {
+          const thumbnail = resolveLibraryThumbnailRef(entry);
+          return getLibraryAssetSrc({ format: "webp", path: thumbnail.path, rootId: thumbnail.rootId, width: 160 });
+        }}
         hasMore={libraryQ.hasNextPage}
         isAvailabilityLoading={availabilityQs.some((availabilityQ) => availabilityQ.isLoading)}
         isLoading={libraryQ.isLoading}

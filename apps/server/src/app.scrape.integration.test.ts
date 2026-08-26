@@ -426,10 +426,11 @@ describe("buildServer scrape integration", () => {
     expect(serverPixels).toEqual(expectedPixels);
   });
 
-  it("keeps organized video on the media root while serving metadata from a local mirror root", async () => {
+  it("keeps source media untouched while serving separated STRM metadata from the selected output root", async () => {
     const mediaRoot = await createTempRoot("separate-metadata-media");
     const metadataRoot = await createTempRoot("separate-metadata-local");
     await writeFile(join(mediaRoot, "ABC-123.mp4"), "video");
+    await writeFile(join(mediaRoot, "ABC-123.zh.srt"), "subtitle");
     const imageServer = await startTestImageServer();
     const { fastify } = await createTestServer({
       scrapeAggregation: createTestAggregation(`${imageServer.url}/image.png`),
@@ -443,6 +444,7 @@ describe("buildServer scrape integration", () => {
       payload: {
         download: { downloadSceneImages: false, downloadTrailer: false },
         paths: { metadataPath: metadataRoot },
+        behavior: { fileMode: "separated" },
       },
     });
 
@@ -461,10 +463,10 @@ describe("buildServer scrape integration", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     const result = resultsResponse.json().result.data.results[0];
-    const outputRelativePath = "JAV_output/Actor A/ABC-123/ABC-123.mp4";
-    const nfoRelativePath = "JAV_output/Actor A/ABC-123/ABC-123.nfo";
-    const strmRelativePath = "JAV_output/Actor A/ABC-123/ABC-123.strm";
-    const posterRelativePath = "JAV_output/Actor A/ABC-123/poster.png";
+    const outputRelativePath = "ABC-123.mp4";
+    const nfoRelativePath = "Actor A/ABC-123-C/ABC-123-C.nfo";
+    const strmRelativePath = "Actor A/ABC-123-C/ABC-123-C.strm";
+    const posterRelativePath = "Actor A/ABC-123-C/poster.png";
 
     expect(result).toMatchObject({
       rootId,
@@ -475,11 +477,18 @@ describe("buildServer scrape integration", () => {
     });
     expect(result.nfoRootId).not.toBe(rootId);
     await expect(readFile(join(mediaRoot, outputRelativePath), "utf8")).resolves.toBe("video");
+    await expect(readFile(join(mediaRoot, "ABC-123.zh.srt"), "utf8")).resolves.toBe("subtitle");
+    await expect(
+      readFile(join(mediaRoot, "JAV_output", "Actor A", "ABC-123", "ABC-123.mp4"), "utf8"),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(readFile(join(mediaRoot, nfoRelativePath), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(metadataRoot, nfoRelativePath), "utf8")).resolves.toContain("Runtime Title ABC-123");
     await expect(readFile(join(metadataRoot, strmRelativePath), "utf8")).resolves.toBe(
       join(mediaRoot, outputRelativePath),
     );
+    await expect(readFile(join(metadataRoot, "Actor A/ABC-123-C/ABC-123-C.zh.srt"), "utf8")).resolves.toBe("subtitle");
     const posterContent = await readFile(join(metadataRoot, posterRelativePath));
     expect([...posterContent.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -492,11 +501,53 @@ describe("buildServer scrape integration", () => {
       result.nfoRootId,
     );
 
+    const separatedLibraryResponse = await fastify.inject({
+      method: "POST",
+      url: "/trpc/library.search",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { query: "ABC-123", limit: 20 },
+    });
+    const separatedEntry = separatedLibraryResponse.json().result.data.entries[0];
+    const posterAsset = separatedEntry.assets.find((asset: { kind: string }) => asset.kind === "poster");
+    expect(separatedEntry).toMatchObject({
+      rootId,
+      thumbnailPath: posterRelativePath,
+    });
+    expect(posterAsset).toMatchObject({
+      kind: "poster",
+      rootId: result.nfoRootId,
+      relativePath: posterRelativePath,
+    });
+
     const assetResponse = await fastify.inject({
       method: "GET",
       url: `/api/library/assets/${encodeURIComponent(result.nfoRootId)}/${encodeURI(posterRelativePath)}?token=${encodeURIComponent(token)}`,
     });
     expect(assetResponse.statusCode).toBe(200);
+    const libraryPosterResponse = await fastify.inject({
+      method: "GET",
+      url: `/api/library/assets/${encodeURIComponent(posterAsset.rootId)}/${encodeURI(posterAsset.relativePath)}?token=${encodeURIComponent(token)}&w=160&format=webp`,
+    });
+    expect(libraryPosterResponse.statusCode).toBe(200);
+    expect(libraryPosterResponse.headers["content-type"]).toContain("image/webp");
+
+    const overviewResponse = await fastify.inject({
+      method: "GET",
+      url: "/trpc/overview.summary",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const recentEntry = overviewResponse.json().result.data.recentAcquisitions[0];
+    expect(recentEntry).toMatchObject({
+      id: separatedEntry.id,
+      rootId,
+      thumbnailPath: posterRelativePath,
+      thumbnailRootId: result.nfoRootId,
+    });
+    const overviewPosterResponse = await fastify.inject({
+      method: "GET",
+      url: `/api/library/assets/${encodeURIComponent(recentEntry.thumbnailRootId)}/${encodeURI(recentEntry.thumbnailPath)}?token=${encodeURIComponent(token)}&w=400&format=webp`,
+    });
+    expect(overviewPosterResponse.statusCode).toBe(200);
 
     const nfoResponse = await fastify.inject({
       method: "GET",

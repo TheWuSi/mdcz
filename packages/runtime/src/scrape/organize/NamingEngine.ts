@@ -353,10 +353,12 @@ export class NamingEngine {
       config.naming.fileNameMax,
     );
     const nfoBaseName = fileInfo.part ? fileBaseName : parse(sourceVideo.base).name;
-    const targetVideoFileName = config.behavior.successFileRename
-      ? `${fileBaseName}${partSuffix}${fileInfo.extension}`
+    const shouldRenameOutput = config.behavior.fileMode === "separated" || config.behavior.successFileRename;
+    const targetExtension = config.behavior.fileMode === "separated" ? ".strm" : fileInfo.extension;
+    const targetVideoFileName = shouldRenameOutput
+      ? `${fileBaseName}${partSuffix}${targetExtension}`
       : sourceVideo.base;
-    const nfoFileName = `${config.behavior.successFileRename ? fileBaseName : nfoBaseName}.nfo`;
+    const nfoFileName = `${shouldRenameOutput ? fileBaseName : nfoBaseName}.nfo`;
 
     return {
       folderRelativePath,
@@ -370,7 +372,10 @@ export class NamingEngine {
       const layout = this.buildLayout(sample.fileInfo, sample.data, config, sample.localState);
       return {
         label: sample.label,
-        folder: config.behavior.successFileMove ? layout.folderRelativePath || "当前目录" : "当前目录",
+        folder:
+          config.behavior.fileMode === "separated" || config.behavior.successFileMove
+            ? layout.folderRelativePath || "当前目录"
+            : "当前目录",
         file: layout.targetVideoFileName,
       };
     });

@@ -45,6 +45,7 @@ export interface LibraryEntryRecord {
   actors: string[];
   crawlerDataJson: string | null;
   thumbnailPath: string | null;
+  thumbnailRootId: string | null;
   lastKnownPath: string | null;
   createdAt: Date;
   lastRefreshedAt: Date | null;
@@ -137,6 +138,7 @@ export interface LibraryOverviewEntryRecord {
   title: string | null;
   actors: string[];
   thumbnailPath: string | null;
+  thumbnailRootId: string | null;
   lastKnownPath: string | null;
   createdAt: Date;
   hiddenFromRecentAt: Date | null;
@@ -275,6 +277,7 @@ const toLibraryEntryRecord = (
     actors: safeActors(item.actorsJson),
     crawlerDataJson: item.crawlerDataJson,
     thumbnailPath: thumbnail?.uri ?? null,
+    thumbnailRootId: thumbnail?.rootId ?? null,
     lastKnownPath: primaryFile.lastKnownPath,
     createdAt: item.createdAt,
     lastRefreshedAt: item.lastRefreshedAt,
@@ -792,6 +795,7 @@ export class LibraryRepository {
                 title: item.title,
                 actors: safeActors(item.actorsJson),
                 thumbnailPath: thumbnail?.uri ?? null,
+                thumbnailRootId: thumbnail?.rootId ?? null,
                 lastKnownPath: primaryFile.lastKnownPath,
                 createdAt: item.createdAt,
                 hiddenFromRecentAt: item.hiddenFromRecentAt,
@@ -943,7 +947,17 @@ const deriveAssets = (
     if (typeof uri !== "string" || !uri.trim()) {
       return;
     }
-    assets.set(`${kind}:${uri}`, {
+    const key = `${kind}:${uri}`;
+    const existing = assets.get(key);
+    if (existing) {
+      assets.set(key, {
+        ...existing,
+        rootId: rootId ?? existing.rootId,
+        relativePath: relativePath ?? existing.relativePath,
+      });
+      return;
+    }
+    assets.set(key, {
       id: randomUUID(),
       kind,
       uri,

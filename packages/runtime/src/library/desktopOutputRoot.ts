@@ -12,6 +12,10 @@ export const resolveDesktopOutputRootPath = (configuration: Configuration): stri
   }
 
   const mediaRoot = configuration.paths.mediaPath.trim();
+  if (configuration.behavior.fileMode === "separated") {
+    const metadataRoot = configuration.paths.metadataPath.trim();
+    return metadataRoot ? path.resolve(metadataRoot) : null;
+  }
   const successFolder = configuration.paths.successOutputFolder.trim();
   if (!mediaRoot || !successFolder) {
     return null;

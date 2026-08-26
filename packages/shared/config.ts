@@ -247,6 +247,7 @@ const pathsSchema = z.object({
 });
 
 const behaviorSchema = z.object({
+  fileMode: z.enum(["organize", "separated"]).default("organize"),
   successFileMove: z.boolean().default(true),
   failedFileMove: z.boolean().default(true),
   successFileRename: z.boolean().default(true),
@@ -451,8 +452,30 @@ export const configurationSchema = z
     aggregation: aggregationSchema.default(() => aggregationSchema.parse({})),
   })
   .superRefine((data, ctx) => {
+    if (data.behavior.fileMode === "separated") {
+      const metadataPath = data.paths.metadataPath.trim();
+      const mediaPath = data.paths.mediaPath.trim();
+      if (!metadataPath) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["paths", "metadataPath"],
+          message: "元数据分离模式必须配置本地元数据目录",
+        });
+      } else if (!mediaPath) {
+        ctx.addIssue({ code: "custom", path: ["paths", "mediaPath"], message: "元数据分离模式必须配置媒体目录" });
+      } else if (
+        !/^([A-Za-z]:[\\/]|[\\/]{1,2})/u.test(metadataPath) ||
+        !/^([A-Za-z]:[\\/]|[\\/]{1,2})/u.test(mediaPath)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["paths", "metadataPath"],
+          message: "分离模式下媒体目录和本地元数据目录必须使用绝对路径",
+        });
+      }
+    }
     const sharedDirectoryMode = isSharedDirectoryMode({
-      successFileMove: data.behavior.successFileMove,
+      successFileMove: data.behavior.fileMode === "separated" || data.behavior.successFileMove,
       folderTemplate: data.naming.folderTemplate,
     });
 

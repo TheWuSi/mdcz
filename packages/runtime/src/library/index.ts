@@ -18,6 +18,7 @@ export interface RuntimeRecentAcquisition {
   title: string | null;
   actors: string[];
   thumbnailPath?: string | null;
+  thumbnailRootId?: string | null;
   lastKnownPath: string | null;
   completedAt: number;
   available?: boolean | null;
@@ -44,6 +45,7 @@ export interface RuntimeLibraryEntrySummaryInput {
   title: string | null;
   actors: string[];
   thumbnailPath?: string | null;
+  thumbnailRootId?: string | null;
   lastKnownPath: string | null;
   createdAt: Date | number | string;
   hiddenFromRecentAt?: Date | number | string | null;
@@ -180,6 +182,7 @@ export const toRuntimeRecentAcquisition = (entry: RuntimeLibraryEntrySummaryInpu
     title: entry.title,
     actors: entry.actors,
     thumbnailPath: entry.thumbnailPath ?? null,
+    thumbnailRootId: entry.thumbnailRootId ?? null,
     lastKnownPath: entry.lastKnownPath,
     completedAt: toTimestampMs(entry.createdAt),
     available: entry.available,

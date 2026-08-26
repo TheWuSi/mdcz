@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { Website } from "@mdcz/shared/enums";
@@ -22,8 +22,8 @@ type SceneImageCandidate = { index: number; url: string; host: string | null };
 const SCENE_IMAGE_ATTEMPT_TIMEOUT_MS = 3_000;
 const SCENE_IMAGE_MIN_BYTES = 4_096;
 
-const buildSceneImageTempFileName = (setIndex: number, index: number): string =>
-  `.scene-set-${String(setIndex + 1).padStart(2, "0")}-candidate-${String(index + 1).padStart(3, "0")}.jpg`;
+const buildSceneImageTempFileName = (runId: string, setIndex: number, index: number): string =>
+  `.scene-${runId}-set-${String(setIndex + 1).padStart(2, "0")}-candidate-${String(index + 1).padStart(3, "0")}.jpg`;
 
 const buildFileSignature = async (filePath: string): Promise<string | undefined> => {
   try {
@@ -65,6 +65,7 @@ export class SceneImageDownloader {
       return [];
     }
 
+    const runId = randomUUID();
     let bestPaths: DownloadedSceneImage[] = [];
 
     for (const [setIndex, sceneImageSet] of input.sceneImageSets.entries()) {
@@ -86,6 +87,7 @@ export class SceneImageDownloader {
       const downloadedPaths = await this.downloadSceneImageSet({
         outputDir: input.outputDir,
         sceneFolder: input.sceneFolder,
+        runId,
         setIndex,
         urls: attemptedUrls,
         maxConcurrent: input.maxConcurrent,
@@ -118,6 +120,7 @@ export class SceneImageDownloader {
   private async downloadSceneImageSet(input: {
     outputDir: string;
     sceneFolder: string;
+    runId: string;
     setIndex: number;
     urls: string[];
     maxConcurrent: number;
@@ -161,7 +164,7 @@ export class SceneImageDownloader {
         const tempPath = join(
           input.outputDir,
           input.sceneFolder,
-          buildSceneImageTempFileName(input.setIndex, candidate.index),
+          buildSceneImageTempFileName(input.runId, input.setIndex, candidate.index),
         );
         const downloadResult = await this.imageDownloader.downloadValidatedImageCandidate(candidate.url, tempPath, {
           timeoutMs: SCENE_IMAGE_ATTEMPT_TIMEOUT_MS,

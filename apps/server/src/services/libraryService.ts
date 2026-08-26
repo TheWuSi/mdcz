@@ -180,6 +180,7 @@ export class LibraryService {
           title: entry.title,
           actors: entry.actors,
           thumbnailPath: entry.thumbnailPath ?? null,
+          thumbnailRootId: entry.thumbnailRootId ?? record?.thumbnailRootId ?? null,
           lastKnownPath: entry.lastKnownPath,
           completedAt: new Date(entry.completedAt).toISOString(),
           available: record && root ? await this.checkAvailability(root, record.rootRelativePath) : null,
@@ -355,6 +356,7 @@ const toRuntimeLibraryEntrySummaryInput = (
     | "number"
     | "size"
     | "thumbnailPath"
+    | "thumbnailRootId"
     | "title"
   >,
 ): RuntimeLibraryEntrySummaryInput => ({
@@ -364,6 +366,7 @@ const toRuntimeLibraryEntrySummaryInput = (
   title: entry.title,
   actors: entry.actors,
   thumbnailPath: entry.thumbnailPath,
+  thumbnailRootId: entry.thumbnailRootId,
   lastKnownPath: entry.lastKnownPath,
   createdAt: entry.createdAt,
   hiddenFromRecentAt: entry.hiddenFromRecentAt,

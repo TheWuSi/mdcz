@@ -436,15 +436,29 @@ describe("LibraryRepository", () => {
       thumbnailPath: "ABC-123/thumb.jpg",
       assets: [
         { kind: "thumb", uri: "ABC-123/thumb.jpg", rootId: "root-1", relativePath: "ABC-123/thumb.jpg" },
-        { kind: "poster", uri: "ABC-123/poster.jpg", rootId: "root-1", relativePath: "ABC-123/poster.jpg" },
+        {
+          kind: "poster",
+          uri: "ABC-123/poster.jpg",
+          rootId: "metadata-root",
+          relativePath: "ABC-123/poster.jpg",
+        },
       ],
     });
 
     await expect(repository.listEntries()).resolves.toEqual([
       expect.objectContaining({
         thumbnailPath: "ABC-123/poster.jpg",
+        thumbnailRootId: "metadata-root",
       }),
     ]);
+    await expect(repository.getOverviewSummary(8)).resolves.toMatchObject({
+      recentEntries: [
+        expect.objectContaining({
+          thumbnailPath: "ABC-123/poster.jpg",
+          thumbnailRootId: "metadata-root",
+        }),
+      ],
+    });
   });
 
   it("relinks the primary library file without retaining the old path", async () => {

@@ -167,7 +167,7 @@ export class DesktopLibraryService {
       number: entry.number,
       actors: entry.actors,
       crawlerData: parseCrawlerData(entry.crawlerDataJson),
-      thumbnailPath: resolveAssetDisplayPath(rootMap, entry.rootId, entry.thumbnailPath),
+      thumbnailPath: resolveAssetDisplayPath(rootMap, entry.thumbnailRootId ?? entry.rootId, entry.thumbnailPath),
       lastKnownPath: resolveAssetDisplayPath(rootMap, entry.rootId, entry.lastKnownPath),
       createdAt: entry.createdAt.toISOString(),
       lastRefreshedAt: toIso(entry.lastRefreshedAt),

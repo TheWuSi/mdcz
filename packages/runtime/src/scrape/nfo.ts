@@ -1,5 +1,6 @@
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
+import { isMovieNfoBaseName } from "@mdcz/shared/assetNaming";
 import { NFO_FIELD_OPTIONS, type NfoField } from "@mdcz/shared/config";
 import { Website } from "@mdcz/shared/enums";
 import type { CrawlerData, DownloadedAssets, FileInfo, NfoLocalState, VideoMeta } from "@mdcz/shared/types";
@@ -288,8 +289,21 @@ export const nfoGenerator = new NfoGenerator();
 export const resolveCanonicalNfoPath = (nfoPath: string, nfoNaming: NfoNamingMode = "both"): string =>
   getNfoWritePaths(nfoPath, nfoNaming).canonicalPath;
 
-export const resolveFilenameNfoPath = (nfoPath: string, videoPath?: string): string =>
-  replaceExtension(videoPath ?? nfoPath, ".nfo");
+export const resolveFilenameNfoPath = (nfoPath: string, videoPath?: string): string => {
+  const nfoBaseName = portableBaseName(replaceExtension(nfoPath, ""));
+  if (!videoPath) {
+    return replaceExtension(nfoPath, ".nfo");
+  }
+
+  const filenameNfoName = portableBaseName(replaceExtension(videoPath, ".nfo"));
+  const nfoDirectory = portableDirName(nfoPath);
+  const videoDirectory = portableDirName(videoPath);
+  if (isMovieNfoBaseName(nfoBaseName) || nfoDirectory === videoDirectory) {
+    return siblingPath(nfoPath, filenameNfoName);
+  }
+
+  return replaceExtension(nfoPath, ".nfo");
+};
 
 export const getNfoReadCandidates = (
   nfoPath: string,
@@ -431,6 +445,16 @@ export interface NfoNamingPaths {
 const siblingPath = (filePath: string, fileName: string): string => {
   const separatorIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   return `${filePath.slice(0, separatorIndex + 1)}${fileName}`;
+};
+
+const portableBaseName = (filePath: string): string => {
+  const separatorIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return filePath.slice(separatorIndex + 1);
+};
+
+const portableDirName = (filePath: string): string => {
+  const separatorIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return separatorIndex < 0 ? "" : filePath.slice(0, separatorIndex);
 };
 
 export const getNfoWritePaths = (nfoPath: string, nfoNaming: NfoNamingMode = "both"): NfoNamingPaths => {

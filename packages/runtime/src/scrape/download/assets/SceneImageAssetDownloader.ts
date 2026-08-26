@@ -13,6 +13,8 @@ import {
 } from "./helpers";
 import type { AssetDownloader, DownloadExecutionContext, DownloadExecutionPlan } from "./types";
 
+const isMissingFileError = (error: unknown): boolean => (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+
 export class SceneImageAssetDownloader implements AssetDownloader {
   shouldDownload(plan: DownloadExecutionPlan): boolean {
     return plan.config.download.downloadSceneImages;
@@ -58,43 +60,41 @@ export class SceneImageAssetDownloader implements AssetDownloader {
       onSceneProgress: plan.callbacks?.onSceneProgress,
     });
 
-    const finalizedSceneCount = Math.min(targetSceneCount, successfulSceneImages.length);
-    for (let index = 0; index < finalizedSceneCount; index += 1) {
-      const sceneImage = successfulSceneImages[index];
-      if (!sceneImage) {
-        continue;
-      }
-
+    const selectedSceneImages = successfulSceneImages.slice(0, targetSceneCount);
+    const finalizedSceneImages: Array<{ path: string; url: string }> = [];
+    for (const sceneImage of selectedSceneImages) {
       const finalPath = join(
         plan.outputDir,
         plan.config.paths.sceneImagesFolder,
-        buildSceneImageFileName(plan.config.paths.sceneImagesFolder, index, sceneImage.path),
+        buildSceneImageFileName(plan.config.paths.sceneImagesFolder, finalizedSceneImages.length, sceneImage.path),
       );
 
       await mkdir(dirname(finalPath), { recursive: true });
-      await unlink(finalPath).catch(() => undefined);
-      if (sceneImage.path !== finalPath) {
+      try {
         await rename(sceneImage.path, finalPath);
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          await unlink(finalPath).catch(() => undefined);
+          await rename(sceneImage.path, finalPath);
+        } else {
+          context.logger.warn(`Scene image temporary file disappeared before finalization: ${sceneImage.path}`);
+          continue;
+        }
       }
       assets.sceneImages.push(finalPath);
       assets.downloaded.push(finalPath);
+      finalizedSceneImages.push({ path: finalPath, url: sceneImage.url });
     }
 
-    for (let index = finalizedSceneCount; index < successfulSceneImages.length; index += 1) {
-      await unlink(successfulSceneImages[index]?.path ?? "").catch(() => undefined);
+    for (const sceneImage of successfulSceneImages.slice(targetSceneCount)) {
+      await unlink(sceneImage.path).catch(() => undefined);
     }
 
-    if (!forceReplaceSceneImages && finalizedSceneCount === 0) {
+    if (!forceReplaceSceneImages && finalizedSceneImages.length === 0) {
       assets.sceneImages.push(...existingSceneImages.slice(0, targetSceneCount));
     }
 
-    this.reportResolvedSceneImageUrls(
-      plan,
-      successfulSceneImages,
-      finalizedSceneCount,
-      existingSceneImages,
-      forceReplaceSceneImages,
-    );
+    this.reportResolvedSceneImageUrls(plan, finalizedSceneImages, existingSceneImages, forceReplaceSceneImages);
 
     if (assets.sceneImages.length > 0 || forceReplaceSceneImages) {
       await removeStaleSceneImages(existingSceneImages, assets.sceneImages, sceneDir);
@@ -124,15 +124,12 @@ export class SceneImageAssetDownloader implements AssetDownloader {
 
   private reportResolvedSceneImageUrls(
     plan: DownloadExecutionPlan,
-    successfulSceneImages: Array<{ path: string; url: string }>,
-    finalizedSceneCount: number,
+    finalizedSceneImages: Array<{ path: string; url: string }>,
     existingSceneImages: string[],
     forceReplaceSceneImages: boolean,
   ): void {
-    if (finalizedSceneCount > 0) {
-      plan.callbacks?.onResolvedSceneImageUrls?.(
-        successfulSceneImages.slice(0, finalizedSceneCount).map((item) => item.url),
-      );
+    if (finalizedSceneImages.length > 0) {
+      plan.callbacks?.onResolvedSceneImageUrls?.(finalizedSceneImages.map((item) => item.url));
       return;
     }
 

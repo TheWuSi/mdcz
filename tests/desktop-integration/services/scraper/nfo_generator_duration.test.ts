@@ -351,6 +351,18 @@ describe("NfoGenerator", () => {
     expect(getNfoReadCandidates(movieNfoPath, "filename", videoPath)).toEqual([filenameNfoPath, movieNfoPath]);
     expect(getNfoReadCandidates(filenameNfoPath, "movie", videoPath)).toEqual([movieNfoPath, filenameNfoPath]);
   });
+  it("keeps filename NFO candidates inside the metadata directory when the video is on another root", () => {
+    expect(resolveFilenameNfoPath("/metadata/Actor A/ABC-123/movie.nfo", "/media/ABC-123.mp4")).toBe(
+      "/metadata/Actor A/ABC-123/ABC-123.nfo",
+    );
+    expect(getNfoReadCandidates("/metadata/Actor A/ABC-123/ABC-123.nfo", "filename", "/media/ABC-123.mp4")).toEqual([
+      "/metadata/Actor A/ABC-123/ABC-123.nfo",
+      "/metadata/Actor A/ABC-123/movie.nfo",
+    ]);
+    expect(resolveFilenameNfoPath("/metadata/Actor A/ABC-123/ABC-123.nfo", "/media/OLD-001.mp4")).toBe(
+      "/metadata/Actor A/ABC-123/ABC-123.nfo",
+    );
+  });
   it("merges editable fields without dropping unmanaged nodes or attributes", () => {
     const existingXml = `<?xml version="1.0"?><movie custom="keep"><title>Old</title><originaltitle>Old</originaltitle><uniqueid type="dmm" default="true">ABC-123</uniqueid><actor role="lead"><name>Actor A</name><thumb>actor.jpg</thumb></actor><fileinfo><streamdetails><video><width>1920</width></video></streamdetails></fileinfo><providerid source="local">keep-me</providerid><mdcz><custom keep="yes">value</custom></mdcz></movie>`;
     const merged = new NfoGenerator().mergeEditableXml(

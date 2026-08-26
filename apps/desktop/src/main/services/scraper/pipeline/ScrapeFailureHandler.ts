@@ -62,7 +62,7 @@ export class ScrapeFailureHandler {
     config: Configuration,
     mode: ScrapeExecutionMode = "batch",
   ): Promise<FileInfo> {
-    if (mode === "single" || !config.behavior.failedFileMove) {
+    if (mode === "single" || config.behavior.fileMode === "separated" || !config.behavior.failedFileMove) {
       return fileInfo;
     }
     if (!(await pathExists(fileInfo.filePath))) {

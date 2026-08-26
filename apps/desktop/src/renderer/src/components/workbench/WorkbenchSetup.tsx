@@ -8,7 +8,7 @@ const createDesktopSetupPort = (config: WorkbenchSetupAdapterProps["config"]): W
     return selection.paths?.[0]?.trim() || null;
   },
   scanCandidates: async (scanDir, excludeDirPaths) => await ipc.file.listMediaCandidates(scanDir, excludeDirPaths),
-  savePaths: async (scanDir, targetDir) => {
+  savePaths: async (scanDir, targetDir, fileMode) => {
     const currentPaths = config?.paths;
     if (!currentPaths) {
       throw new Error("配置尚未加载完成");
@@ -18,7 +18,9 @@ const createDesktopSetupPort = (config: WorkbenchSetupAdapterProps["config"]): W
       paths: {
         ...currentPaths,
         mediaPath: scanDir,
-        successOutputFolder: targetDir || currentPaths.successOutputFolder,
+        ...(fileMode === "separated"
+          ? { metadataPath: targetDir || currentPaths.metadataPath }
+          : { successOutputFolder: targetDir || currentPaths.successOutputFolder }),
       },
     });
   },

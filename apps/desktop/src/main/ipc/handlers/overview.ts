@@ -85,7 +85,11 @@ const readPersistedRecentAcquisitions = async (context: ServiceContainer): Promi
     number: record.number,
     title: record.title,
     actors: record.actors,
-    thumbnailPath: resolveLibraryPath(rootMap, entryById.get(record.id ?? "")?.rootId, record.thumbnailPath),
+    thumbnailPath: resolveLibraryPath(
+      rootMap,
+      entryById.get(record.id ?? "")?.thumbnailRootId ?? entryById.get(record.id ?? "")?.rootId,
+      record.thumbnailPath,
+    ),
     lastKnownPath: resolveLibraryPath(rootMap, entryById.get(record.id ?? "")?.rootId, record.lastKnownPath),
     completedAt: record.completedAt,
   }));

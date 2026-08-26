@@ -387,9 +387,9 @@ export class ScrapeService {
         await this.addEvent(task.id, "item-failed", `Uncensored confirmation skipped: ${result.relativePath}`);
         continue;
       }
-      const outputRelativePath = toRootRelativeAssetPath(root, updated.targetVideoPath);
+      const outputRelativePath =
+        toRootRelativeAssetPath(root, updated.targetVideoPath) ?? result.outputRelativePath ?? result.relativePath;
       const nfoRelativePath = toRootRelativeAssetPath(metadataRoot, updated.targetNfoPath);
-      if (!outputRelativePath) throw new Error(`Confirmed output escaped media root: ${updated.targetVideoPath}`);
       const stored = await state.repositories.library.upsertScrapeResult({
         ...result,
         status: "success",
@@ -403,7 +403,10 @@ export class ScrapeService {
         result.rootId,
         result.outputRelativePath ?? result.relativePath,
       );
-      const fileStats = await stat(updated.targetVideoPath);
+      const persistedVideoPath = toRootRelativeAssetPath(root, updated.targetVideoPath)
+        ? updated.targetVideoPath
+        : sourceVideoPath;
+      const fileStats = await stat(persistedVideoPath);
       await state.repositories.library.relinkEntry({
         id: entry.id,
         rootId: result.rootId,
@@ -1017,6 +1020,13 @@ export class ScrapeService {
 
   private resolveMetadataVideoPath(result: ScrapeResultRecord): string {
     const outputRelativePath = result.outputRelativePath ?? result.relativePath;
+    const nfoRelativePath = result.nfoRelativePath?.trim();
+    if (result.nfoRootId && nfoRelativePath && path.posix.basename(nfoRelativePath).toLowerCase() !== "movie.nfo") {
+      return path.posix.join(
+        path.posix.dirname(nfoRelativePath),
+        `${path.posix.basename(nfoRelativePath, path.posix.extname(nfoRelativePath))}.strm`,
+      );
+    }
     return result.nfoRootId
       ? path.posix.join(
           path.posix.dirname(outputRelativePath),

@@ -306,6 +306,15 @@ export function useCrawlerSiteOptions(flatDefaults: Record<string, unknown>): st
 export function PathsSection() {
   return (
     <>
+      <EnumField
+        name="behavior.fileMode"
+        label="刮削输出模式"
+        options={[
+          { value: "organize", label: "整理源文件" },
+          { value: "separated", label: "保存分离副本" },
+        ]}
+        description="整理源文件会按文件行为设置移动或重命名媒体；保存分离副本会在本地元数据目录生成改名后的 STRM、复制并重命名字幕，同时保留源目录不变。"
+      />
       <PathFieldWrapper name="paths.mediaPath" label="媒体目录" isDirectory />
       <PathFieldWrapper
         name="paths.metadataPath"
@@ -405,7 +414,8 @@ export function AssetDownloadsSection() {
     boolean | undefined,
   ];
   const folderTemplate = String(form.watch("naming.folderTemplate") ?? "");
-  const successFileMove = Boolean(form.watch("behavior.successFileMove"));
+  const fileMode = String(form.watch("behavior.fileMode") ?? "organize");
+  const successFileMove = fileMode === "separated" || Boolean(form.watch("behavior.successFileMove"));
   const sharedDirectoryMode = isSharedDirectoryMode({ successFileMove, folderTemplate });
   const showTagBadgeSettings = Boolean(downloadPoster) && Boolean(tagBadges);
 
@@ -965,7 +975,8 @@ export function NamingSection() {
   const hasRenderableFields = useHasRenderableFields(NAMING_SECTION_FIELD_KEYS);
   const form = useFormContext<FieldValues>();
   const folderTemplate = String(form.watch("naming.folderTemplate") ?? "");
-  const successFileMove = Boolean(form.watch("behavior.successFileMove"));
+  const fileMode = String(form.watch("behavior.fileMode") ?? "organize");
+  const successFileMove = fileMode === "separated" || Boolean(form.watch("behavior.successFileMove"));
   const sharedDirectoryMode = isSharedDirectoryMode({ successFileMove, folderTemplate });
 
   if (!hasRenderableFields) {
@@ -1262,12 +1273,14 @@ export function UiSection({ initialUseCustomTitleBar }: UiSectionProps) {
 }
 
 export function BehaviorSection() {
+  const form = useFormContext<FieldValues>();
+  const fileMode = String(form.watch("behavior.fileMode") ?? "organize");
   return (
     <>
-      <BoolField name="behavior.successFileMove" label="成功后移动文件" />
-      <BoolField name="behavior.failedFileMove" label="失败后移动文件" />
-      <BoolField name="behavior.successFileRename" label="成功后重命名文件" />
-      <BoolField name="behavior.deleteEmptyFolder" label="删除空文件夹" />
+      {fileMode !== "separated" && <BoolField name="behavior.successFileMove" label="成功后移动文件" />}
+      {fileMode !== "separated" && <BoolField name="behavior.failedFileMove" label="失败后移动文件" />}
+      {fileMode !== "separated" && <BoolField name="behavior.successFileRename" label="成功后重命名文件" />}
+      {fileMode !== "separated" && <BoolField name="behavior.deleteEmptyFolder" label="删除空文件夹" />}
       <BoolField name="behavior.scrapeSoftlinkPath" label="刮削软链接目录" />
       <BoolField name="behavior.saveLog" label="保存日志到文件" />
     </>

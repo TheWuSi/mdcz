@@ -104,6 +104,33 @@ describe("workbench setup contract", () => {
     expect(plan.excludeDirPaths).toEqual([failedDir]);
   });
 
+  it("excludes a separated metadata directory when it is nested under the selected scan root", () => {
+    const scanRoot = process.platform === "win32" ? "D:\\library" : "/library";
+    const mediaDir = process.platform === "win32" ? "D:\\library\\media" : "/library/media";
+    const metadataDir = process.platform === "win32" ? "D:\\library\\strms" : "/library/strms";
+    const plan = resolveMediaCandidateScanPlan(
+      "scrape",
+      scanRoot,
+      createConfig({
+        paths: {
+          mediaPath: mediaDir,
+          metadataPath: metadataDir,
+          successOutputFolder: "JAV_output",
+          failedOutputFolder: "failed",
+          softlinkPath: softlinkDir,
+          outputSummaryPath: "",
+          defaultScanExcludeDirs: [],
+        },
+        behavior: {
+          fileMode: "separated",
+          scrapeSoftlinkPath: false,
+        },
+      } as unknown as Partial<ConfigOutput>),
+    );
+
+    expect(plan.excludeDirPaths).toEqual([metadataDir]);
+  });
+
   it("filters output-folder candidates and dedupes merged scan roots", () => {
     const keptVideo = createCandidate(
       process.platform === "win32" ? "D:\\media\\library\\ABC-123.mp4" : "/media/library/ABC-123.mp4",

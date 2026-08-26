@@ -3,6 +3,18 @@ import { configurationSchema, defaultConfiguration, NFO_FIELD_OPTIONS, type NfoF
 import { parseConfigurationContent, serializeConfiguration } from "./configCodec";
 
 describe("configuration codec", () => {
+  it("defaults to organize mode and validates separated mode paths", () => {
+    expect(parseConfigurationContent("[behavior]\n", "toml").behavior.fileMode).toBe("organize");
+    expect(() =>
+      configurationSchema.parse({ behavior: { fileMode: "separated" }, paths: { mediaPath: "/media" } }),
+    ).toThrow("元数据分离模式必须配置本地元数据目录");
+    expect(
+      configurationSchema.parse({
+        behavior: { fileMode: "separated" },
+        paths: { mediaPath: "/media", metadataPath: "/metadata" },
+      }).behavior.fileMode,
+    ).toBe("separated");
+  });
   it("defaults separated metadata storage off and round-trips an explicit path", () => {
     expect(parseConfigurationContent("[paths]\n", "toml").paths.metadataPath).toBe("");
 

@@ -148,6 +148,87 @@ describe("FileOrganizer filesystem organize", () => {
     await expectPathExists(organizedPath);
   });
 
+  it("creates a renamed STRM and copied subtitles without modifying source files in separated mode", async () => {
+    const root = await createTempDir();
+    const mediaRoot = join(root, "media");
+    const metadataRoot = join(root, "metadata");
+    const sourcePath = join(mediaRoot, "incoming", "ABC-123.mp4");
+    const subtitlePath = join(mediaRoot, "incoming", "ABC-123.zh.srt");
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, "video", "utf8");
+    await writeFile(subtitlePath, "subtitle", "utf8");
+
+    const organizer = new FileOrganizer();
+    const config = createConfig({
+      paths: { mediaPath: mediaRoot, metadataPath: metadataRoot, successOutputFolder: "organized" },
+      naming: { folderTemplate: "{number}", fileTemplate: "{number}" },
+      behavior: { fileMode: "separated", successFileMove: true, successFileRename: true },
+    });
+    const fileInfo = createFileInfo({ filePath: sourcePath, fileName: "ABC-123" });
+    const plan = await organizer.ensureOutputReady(organizer.plan(fileInfo, createCrawlerData(), config), sourcePath);
+    const strmPath = await organizer.organizeVideo(fileInfo, plan, config);
+
+    expect(strmPath).toBe(join(metadataRoot, "ABC-123-CEN", "ABC-123-CEN.strm"));
+    expect(plan).toMatchObject({
+      outputDir: join(metadataRoot, "ABC-123-CEN"),
+      metadataDir: join(metadataRoot, "ABC-123-CEN"),
+      nfoPath: join(metadataRoot, "ABC-123-CEN", "ABC-123-CEN.nfo"),
+      targetVideoPath: strmPath,
+    });
+    await expect(readFile(sourcePath, "utf8")).resolves.toBe("video");
+    await expect(readFile(subtitlePath, "utf8")).resolves.toBe("subtitle");
+    await expect(readFile(strmPath, "utf8")).resolves.toBe(resolve(sourcePath));
+    await expect(readFile(join(dirname(strmPath), "ABC-123-CEN.zh.srt"), "utf8")).resolves.toBe("subtitle");
+    expect(plan.strmPath).toBeUndefined();
+  });
+
+  it("copies a source STRM as a renamed playable STRM without changing its relative target", async () => {
+    const root = await createTempDir();
+    const mediaRoot = join(root, "media");
+    const metadataRoot = join(root, "metadata");
+    const sourcePath = join(mediaRoot, "incoming", "ABC-123.strm");
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, "../videos/ABC-123.mp4", "utf8");
+
+    const organizer = new FileOrganizer();
+    const config = createConfig({
+      paths: { mediaPath: mediaRoot, metadataPath: metadataRoot, successOutputFolder: "organized" },
+      naming: { folderTemplate: "{number}", fileTemplate: "{number}" },
+      behavior: { fileMode: "separated" },
+    });
+    const fileInfo = createFileInfo({ filePath: sourcePath, fileName: "ABC-123", extension: ".strm" });
+    const plan = await organizer.ensureOutputReady(organizer.plan(fileInfo, createCrawlerData(), config), sourcePath);
+
+    await organizer.organizeVideo(fileInfo, plan, config);
+
+    await expect(readFile(sourcePath, "utf8")).resolves.toBe("../videos/ABC-123.mp4");
+    await expect(readFile(plan.targetVideoPath, "utf8")).resolves.toBe(resolve(mediaRoot, "videos", "ABC-123.mp4"));
+  });
+
+  it("rejects an empty source STRM before creating separated output", async () => {
+    const root = await createTempDir();
+    const mediaRoot = join(root, "media");
+    const metadataRoot = join(root, "metadata");
+    const sourcePath = join(mediaRoot, "incoming", "ABC-123.strm");
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, "", "utf8");
+
+    const organizer = new FileOrganizer();
+    const config = createConfig({
+      paths: { mediaPath: mediaRoot, metadataPath: metadataRoot },
+      naming: { folderTemplate: "{number}", fileTemplate: "{number}" },
+      behavior: { fileMode: "separated" },
+    });
+    const fileInfo = createFileInfo({ filePath: sourcePath, fileName: "ABC-123", extension: ".strm" });
+    const plan = organizer.plan(fileInfo, createCrawlerData(), config);
+
+    await expect(organizer.ensureOutputReady(plan, sourcePath)).rejects.toThrow(
+      `STRM 文件不包含有效目标：${sourcePath}`,
+    );
+    await expect(readFile(sourcePath, "utf8")).resolves.toBe("");
+    await expect(access(plan.targetVideoPath)).rejects.toThrow();
+  });
+
   it("copies the playable target when separated metadata is generated from a source STRM", async () => {
     const root = await createTempDir();
     const mediaRoot = join(root, "media");

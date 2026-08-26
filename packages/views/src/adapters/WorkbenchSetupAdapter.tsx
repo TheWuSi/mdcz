@@ -4,7 +4,7 @@ import { formatBytes } from "@mdcz/shared/format";
 import {
   mergeMediaCandidates,
   resolveMediaCandidateScanPlan,
-  resolveSuccessTargetDir,
+  resolveWorkbenchTargetDir,
   type WorkbenchSetupMode,
 } from "@mdcz/shared/mediaCandidate";
 import type { ServerPathSuggestResponse } from "@mdcz/shared/serverDtos";
@@ -26,7 +26,7 @@ export interface CandidateScanResult {
 export interface WorkbenchSetupPort {
   browseDirectory(kind: "scan" | "target", currentPath: string): Promise<string | null>;
   scanCandidates(scanDir: string, excludeDirPaths?: readonly string[]): Promise<CandidateScanResult>;
-  savePaths(scanDir: string, targetDir: string): Promise<void>;
+  savePaths(scanDir: string, targetDir: string, fileMode: Configuration["behavior"]["fileMode"]): Promise<void>;
   isServer?: boolean;
   suggestDirectory?: (input: { kind: "scan" | "target"; path: string }) => Promise<ServerPathSuggestResponse>;
 }
@@ -182,7 +182,7 @@ export function WorkbenchSetupAdapter({
     }
 
     const nextScanDir = config.paths?.mediaPath?.trim() ?? "";
-    const nextTargetDir = resolveSuccessTargetDir(nextScanDir, config.paths?.successOutputFolder);
+    const nextTargetDir = resolveWorkbenchTargetDir(nextScanDir, config);
     if (nextScanDir && !scanDir) {
       setScanDir(nextScanDir);
     }
@@ -191,6 +191,24 @@ export function WorkbenchSetupAdapter({
     }
     initializedRef.current = true;
   }, [config, scanDir, setScanDir, setTargetDir, targetDir]);
+
+  useEffect(() => {
+    if (!config) {
+      return;
+    }
+    const nextTargetDir = resolveWorkbenchTargetDir(scanDir, config);
+    if (nextTargetDir && nextTargetDir !== targetDir) {
+      setTargetDir(nextTargetDir);
+    }
+  }, [
+    config?.behavior.fileMode,
+    config?.paths?.metadataPath,
+    config?.paths?.successOutputFolder,
+    scanDir,
+    setTargetDir,
+    targetDir,
+    config,
+  ]);
 
   useEffect(() => {
     const expectedPlanKey = resolveMediaCandidateScanPlan(mode, scanDir, config).scanKey;
@@ -210,7 +228,7 @@ export function WorkbenchSetupAdapter({
       }
       setScanDir(selectedPath);
       if (!targetDir) {
-        setTargetDir(resolveSuccessTargetDir(selectedPath, config?.paths?.successOutputFolder));
+        setTargetDir(resolveWorkbenchTargetDir(selectedPath, config));
       }
     } catch (error) {
       toast.error(`选择扫描目录失败: ${toErrorMessage(error)}`);
@@ -236,7 +254,7 @@ export function WorkbenchSetupAdapter({
 
     setStartPending(true);
     try {
-      await port.savePaths(scanDir, targetDir);
+      await port.savePaths(scanDir, targetDir, config?.behavior.fileMode ?? "organize");
       if (mode === "maintenance") {
         await onStartMaintenance(selectedPaths, scanDir, targetDir, presetId);
       } else {
@@ -253,6 +271,7 @@ export function WorkbenchSetupAdapter({
       configLoading={configLoading}
       scanDir={scanDir}
       targetDir={targetDir}
+      targetLabel={config?.behavior.fileMode === "separated" ? "本地元数据目录" : "输出目录"}
       candidates={candidates}
       selectedPaths={selectedPaths}
       selectedSize={selectedSize}
@@ -283,7 +302,7 @@ export function WorkbenchSetupAdapter({
       onScanDirChange={(value) => {
         setScanDir(value);
         if (!targetDir) {
-          setTargetDir(resolveSuccessTargetDir(value, config?.paths?.successOutputFolder));
+          setTargetDir(resolveWorkbenchTargetDir(value, config));
         }
       }}
       onTargetDirChange={setTargetDir}

@@ -1,5 +1,5 @@
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, normalize, resolve } from "node:path";
+import { copyFile, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, extname, normalize, resolve } from "node:path";
 import { toErrorMessage } from "@mdcz/shared/error";
 import {
   buildGeneratedVideoSidecarTargetPath,
@@ -95,6 +95,53 @@ export class FileMover {
       }
 
       throw new Error(`Failed to move bundled media: ${message}`);
+    }
+  }
+
+  async createSeparatedStrmBundle(
+    sourceVideoPath: string,
+    targetStrmPath: string,
+    options: { subtitleSidecars?: SubtitleSidecarMatch[]; sharedMovieBaseName: string },
+  ): Promise<string> {
+    const sidecars = await this.sidecarResolver.resolve(sourceVideoPath, options.subtitleSidecars);
+    const copied: string[] = [];
+    try {
+      const playableTarget = resolve(sourceVideoPath);
+      if (isStrmFile(sourceVideoPath)) {
+        const sourceTarget = await inspectStrmTarget(sourceVideoPath);
+        if (!sourceTarget) {
+          throw new Error(`STRM 文件不包含有效目标：${sourceVideoPath}`);
+        }
+        await copyFile(sourceVideoPath, targetStrmPath);
+        copied.push(targetStrmPath);
+        if (sourceTarget.kind === "relative_path" && sourceTarget.resolvedPath) {
+          await writeStrmTarget(targetStrmPath, sourceTarget.resolvedPath);
+        }
+      } else {
+        await writeStrmTarget(targetStrmPath, playableTarget);
+        copied.push(targetStrmPath);
+      }
+
+      for (const subtitle of sidecars.subtitleSidecars) {
+        const target = buildSubtitleSidecarTargetPath(subtitle, targetStrmPath);
+        await copyFile(subtitle.path, target);
+        copied.push(target);
+      }
+      for (const generated of sidecars.generatedVideoSidecars) {
+        const mediaTarget = buildGeneratedVideoSidecarTargetPath(
+          generated,
+          dirname(targetStrmPath),
+          options.sharedMovieBaseName,
+        );
+        const extension = extname(mediaTarget);
+        const target = `${extension ? mediaTarget.slice(0, -extension.length) : mediaTarget}.strm`;
+        await writeStrmTarget(target, resolve(generated.path));
+        copied.push(target);
+      }
+      return targetStrmPath;
+    } catch (error) {
+      await Promise.all(copied.map((path) => rm(path, { force: true }).catch(() => undefined)));
+      throw error;
     }
   }
 

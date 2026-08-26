@@ -55,11 +55,11 @@ const createWebSetupPort = (): WorkbenchSetupPort => ({
       supportedExtensions: [...SUPPORTED_MEDIA_EXTENSIONS],
     };
   },
-  savePaths: async (scanDir, targetDir) => {
+  savePaths: async (scanDir, targetDir, fileMode) => {
     await api.config.save({
       paths: {
         mediaPath: scanDir,
-        successOutputFolder: targetDir,
+        ...(fileMode === "separated" ? { metadataPath: targetDir } : { successOutputFolder: targetDir }),
       },
     });
   },

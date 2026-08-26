@@ -14,6 +14,7 @@ export interface WorkbenchSetupViewProps {
   configLoading?: boolean;
   scanDir: string;
   targetDir: string;
+  targetLabel?: string;
   candidates: MediaCandidate[];
   selectedPaths: string[];
   selectedSize: number;
@@ -159,6 +160,7 @@ export function WorkbenchSetupView({
   configLoading = false,
   scanDir,
   targetDir,
+  targetLabel = "输出目录",
   candidates,
   selectedPaths,
   selectedSize,
@@ -212,7 +214,7 @@ export function WorkbenchSetupView({
                 loadSuggestions={onSuggestScanDir ? (value) => onSuggestScanDir({ path: value }) : undefined}
               />
               <PathControl
-                label="输出目录"
+                label={targetLabel}
                 value={targetDir}
                 placeholder={configLoading ? "正在读取配置..." : "请选择输出目录"}
                 onBrowse={onBrowseTargetDir}

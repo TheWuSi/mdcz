@@ -722,6 +722,7 @@ export const overviewRecentAcquisitionSchema = z.object({
   title: z.string().nullable(),
   actors: z.array(z.string()),
   thumbnailPath: z.string().nullable(),
+  thumbnailRootId: z.string().nullable(),
   lastKnownPath: z.string().nullable(),
   completedAt: z.string(),
   available: z.boolean().nullable(),
