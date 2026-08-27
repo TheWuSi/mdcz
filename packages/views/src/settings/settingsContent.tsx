@@ -401,31 +401,24 @@ export function AssetDownloadsSection() {
   const hasRenderableFields = useHasRenderableFields(ASSET_DOWNLOAD_FIELD_KEYS);
   const search = useOptionalSettingsSearch();
   const form = useFormContext<FieldValues>();
-  const [
-    downloadThumb,
-    downloadPoster,
-    tagBadges,
-    downloadFanart,
-    downloadSceneImages,
-    downloadTrailer,
-    subtitleCat,
-  ] = form.watch([
-    "download.downloadThumb",
-    "download.downloadPoster",
-    "download.tagBadges",
-    "download.downloadFanart",
-    "download.downloadSceneImages",
-    "download.downloadTrailer",
-    "download.subtitleCat",
-  ]) as [
-    boolean | undefined,
-    boolean | undefined,
-    boolean | undefined,
-    boolean | undefined,
-    boolean | undefined,
-    boolean | undefined,
-    boolean | undefined,
-  ];
+  const [downloadThumb, downloadPoster, tagBadges, downloadFanart, downloadSceneImages, downloadTrailer, subtitleCat] =
+    form.watch([
+      "download.downloadThumb",
+      "download.downloadPoster",
+      "download.tagBadges",
+      "download.downloadFanart",
+      "download.downloadSceneImages",
+      "download.downloadTrailer",
+      "download.subtitleCat",
+    ]) as [
+      boolean | undefined,
+      boolean | undefined,
+      boolean | undefined,
+      boolean | undefined,
+      boolean | undefined,
+      boolean | undefined,
+      boolean | undefined,
+    ];
   const folderTemplate = String(form.watch("naming.folderTemplate") ?? "");
   const fileMode = String(form.watch("behavior.fileMode") ?? "organize");
   const successFileMove = fileMode === "separated" || Boolean(form.watch("behavior.successFileMove"));

@@ -162,7 +162,10 @@ describe("PosterWatermarkService", () => {
     const watermarkDirectory = join(dataDir, "watermark");
     await mkdir(watermarkDirectory, { recursive: true });
     const posterPath = join(dataDir, "poster.png");
-    const variantPath = join(watermarkDirectory, `${POSTER_TAG_BADGE_SUBTITLE_VARIANT_IMAGE_FILENAMES.embedded[0]}.png`);
+    const variantPath = join(
+      watermarkDirectory,
+      `${POSTER_TAG_BADGE_SUBTITLE_VARIANT_IMAGE_FILENAMES.embedded[0]}.png`,
+    );
     const sharedPath = join(watermarkDirectory, `${POSTER_TAG_BADGE_IMAGE_FILENAMES.subtitle[0]}.png`);
     const variantColor: [number, number, number] = [0, 200, 0];
     const sharedColor: [number, number, number] = [0, 0, 200];

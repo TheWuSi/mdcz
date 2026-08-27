@@ -215,16 +215,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
   "titleRepair.enabled": ["title repair", "masked title", "标题修复", "遮蔽标题"],
   "titleRepair.rules": ["title repair", "replacement", "replace", "标题替换", "修复规则"],
   "download.generateNfo": ["nfo", "metadata file"],
-  "download.subtitleCat": [
-    "subtitle",
-    "subtitlecat",
-    "subtitles",
-    "srt",
-    "字幕",
-    "中文字幕",
-    "在线字幕",
-    "字幕下载",
-  ],
+  "download.subtitleCat": ["subtitle", "subtitlecat", "subtitles", "srt", "字幕", "中文字幕", "在线字幕", "字幕下载"],
   "download.subtitleCatFallbackTraditional": [
     "subtitle",
     "subtitlecat",

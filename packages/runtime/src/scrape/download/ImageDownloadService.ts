@@ -132,10 +132,7 @@ export class ImageDownloadService {
     return outcome ?? { status: "skipped", reason: "download_failed" };
   }
 
-  private async copyCachedImage(
-    cached: CachedScrapeAsset,
-    outputPath: string,
-  ): Promise<DownloadValidatedImageResult> {
+  private async copyCachedImage(cached: CachedScrapeAsset, outputPath: string): Promise<DownloadValidatedImageResult> {
     const targetPath = this.resolveImageOutputPath(outputPath, cached.format);
     const copiedPath = await this.copyDerivedImage(cached.path, targetPath, "cached");
     if (!copiedPath) {
