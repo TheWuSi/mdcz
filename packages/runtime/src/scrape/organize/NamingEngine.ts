@@ -4,7 +4,7 @@ import { Website } from "@mdcz/shared/enums";
 import type { CrawlerData, FileInfo, NamingPreviewItem, NfoLocalState } from "@mdcz/shared/types";
 import { classifyMovie, type MovieClassification } from "../utils/movieClassification";
 import { buildSafeFileName, buildSafePath } from "../utils/path";
-import { resolveFileInfoSubtitleTag } from "../utils/subtitles";
+import { hasNativeChineseSubtitleTag, resolveFileInfoSubtitleTag } from "../utils/subtitles";
 
 export interface NamingLayout {
   folderRelativePath: string;
@@ -47,12 +47,65 @@ const pickActorTemplateValue = (config: Configuration, actors: string[], data: C
 
 const normalizeMarker = (value: string): string => value.trim();
 
-const appendMarker = (markers: string[], value: string): void => {
+type NamingMarkerKind = "subtitle" | "umr" | "leak" | "uncensored" | "censored";
+
+interface NamingMarker {
+  kind: NamingMarkerKind;
+  value: string;
+}
+
+const appendMarker = (markers: NamingMarker[], kind: NamingMarkerKind, value: string): void => {
   const marker = normalizeMarker(value);
-  if (!marker || markers.includes(marker)) {
+  if (!marker || markers.some((entry) => entry.value === marker)) {
     return;
   }
-  markers.push(marker);
+  markers.push({ kind, value: marker });
+};
+
+/** A marker short enough to read as part of one suffix, e.g. `-C`, `-U`, `-4K`. */
+const SHORT_MARKER_PATTERN = /^([-_.])([A-Za-z0-9]{1,2})$/u;
+/** Censorship markers merge in this order so `-U` + `-C` reads as the conventional `-UC`. */
+const CENSORSHIP_MARKER_ORDER: readonly NamingMarkerKind[] = ["umr", "leak", "uncensored", "censored"];
+
+/**
+ * Collapses the Chinese-subtitle marker and the censorship markers into a single suffix when all of
+ * them are short and share a delimiter: `-C` plus `-U` becomes `-UC`, not `-C-U`. Long markers — the
+ * `-破解` / `-流出` defaults, or anything a user typed — are left exactly where they were, so existing
+ * libraries keep their names.
+ */
+const mergeShortNamingMarkers = (markers: NamingMarker[]): NamingMarker[] => {
+  const subtitleMarker = markers.find((marker) => marker.kind === "subtitle");
+  const subtitleMatch = subtitleMarker?.value.match(SHORT_MARKER_PATTERN);
+  if (!subtitleMatch) {
+    return markers;
+  }
+
+  const delimiter = subtitleMatch[1];
+  const mergeable = new Set(
+    markers.filter((marker) => {
+      if (marker.kind === "subtitle") {
+        return false;
+      }
+      const match = marker.value.match(SHORT_MARKER_PATTERN);
+      return match !== null && match[1] === delimiter;
+    }),
+  );
+  if (mergeable.size === 0) {
+    return markers;
+  }
+
+  const censorshipLetters = [...mergeable]
+    .sort((left, right) => CENSORSHIP_MARKER_ORDER.indexOf(left.kind) - CENSORSHIP_MARKER_ORDER.indexOf(right.kind))
+    .map((marker) => marker.value.slice(delimiter.length))
+    .join("");
+
+  return markers
+    .filter((marker) => !mergeable.has(marker))
+    .map((marker) =>
+      marker === subtitleMarker
+        ? { kind: "subtitle" as const, value: `${delimiter}${censorshipLetters}${subtitleMatch[2]}` }
+        : marker,
+    );
 };
 
 const formatPartSuffix = (fileInfo: FileInfo, config: Configuration): string => {
@@ -72,26 +125,28 @@ const buildNamingMarkers = (
   config: Configuration,
   classification: MovieClassification,
 ): string[] => {
-  const markers: string[] = [];
-  if (resolveFileInfoSubtitleTag(fileInfo) === "中文字幕") {
-    appendMarker(markers, config.naming.cnwordStyle);
+  const markers: NamingMarker[] = [];
+  // Only a filename-native marker may reach the output name; sidecar or downloaded
+  // subtitles must never append `-C` to a number that did not carry one.
+  if (hasNativeChineseSubtitleTag(fileInfo)) {
+    appendMarker(markers, "subtitle", config.naming.cnwordStyle);
   }
 
   if (classification.umr) {
-    appendMarker(markers, config.naming.umrStyle);
+    appendMarker(markers, "umr", config.naming.umrStyle);
   }
 
   if (classification.leak) {
-    appendMarker(markers, config.naming.leakStyle);
+    appendMarker(markers, "leak", config.naming.leakStyle);
   }
 
   if (classification.uncensored) {
-    appendMarker(markers, config.naming.uncensoredStyle);
+    appendMarker(markers, "uncensored", config.naming.uncensoredStyle);
   } else {
-    appendMarker(markers, config.naming.censoredStyle);
+    appendMarker(markers, "censored", config.naming.censoredStyle);
   }
 
-  return markers;
+  return mergeShortNamingMarkers(markers).map((marker) => marker.value);
 };
 
 const buildNumberWithNamingMarkers = (number: string, markers: string[]): string => {
@@ -267,8 +322,26 @@ const NAMING_PREVIEW_SAMPLES: Array<{
   },
   {
     label: "中文字幕",
-    fileInfo: previewFileInfo("ABC-456", { isSubtitled: true, subtitleTag: "中文字幕", resolution: "2160P" }),
+    fileInfo: previewFileInfo("ABC-456", {
+      isSubtitled: true,
+      subtitleTag: "中文字幕",
+      nativeSubtitled: true,
+      subtitleOrigin: "embedded",
+      resolution: "2160P",
+    }),
     data: previewData("ABC-456", { title_zh: "中文字幕示例", actors: ["演员B"], studio: "Studio X" }),
+  },
+  {
+    label: "无码破解中字",
+    fileInfo: previewFileInfo("ABC-789", {
+      isSubtitled: true,
+      subtitleTag: "中文字幕",
+      nativeSubtitled: true,
+      subtitleOrigin: "embedded",
+      isUncensored: true,
+      filenameUncensoredChoice: "umr",
+    }),
+    data: previewData("ABC-789", { title_zh: "无码破解中字示例", actors: ["演员C"], studio: "Studio Y" }),
   },
   {
     label: "多演员",
@@ -307,7 +380,8 @@ export class NamingEngine {
     const outline = data.plot_zh?.trim() || data.plot?.trim();
     const definition = formatDefinition(fileInfo);
     const fourK = formatFourKLabel(definition);
-    const cnword = resolveFileInfoSubtitleTag(fileInfo) === "中文字幕" ? config.naming.cnwordStyle : undefined;
+    const nativeChineseSubtitle = hasNativeChineseSubtitleTag(fileInfo);
+    const cnword = nativeChineseSubtitle ? config.naming.cnwordStyle : undefined;
     const sourceFileName = fileInfo.fileName.trim() || parse(fileInfo.filePath).name;
     const censorshipType = formatCensorshipType(classification);
     const templateData = {
@@ -336,7 +410,7 @@ export class NamingEngine {
       resolution: definition,
       "4K": fourK,
       cnword,
-      subtitle: resolveFileInfoSubtitleTag(fileInfo),
+      subtitle: nativeChineseSubtitle ? resolveFileInfoSubtitleTag(fileInfo) : undefined,
       censorshipType,
       score: toTemplateValue(data.rating),
       rating: toTemplateValue(data.rating),

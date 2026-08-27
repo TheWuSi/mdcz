@@ -15,17 +15,32 @@ const SUBTITLE_TOKEN_SOURCE = joinRegexAlternation([
   ...CHINESE_SUBTITLE_FILENAME_TOKEN_HINTS,
   ...CHINESE_SUBTITLE_STRONG_HINTS,
 ]);
-const UNCENSORED_PATTERN = new RegExp(
-  `(?:^|${FILENAME_DELIMITER_SOURCE})(?:UC|U)(?:$|${FILENAME_DELIMITER_SOURCE})`,
-  "iu",
-);
 const CRACKED_CU_TOKEN_SOURCE = `C${FILENAME_DELIMITER_SOURCE}U`;
-const CRACKED_CU_PATTERN = new RegExp(
-  `(?:^|${FILENAME_DELIMITER_SOURCE})${CRACKED_CU_TOKEN_SOURCE}(?:$|${FILENAME_DELIMITER_SOURCE})`,
+/**
+ * `U` means UMR, and `UC` is UMR plus burned-in Chinese subtitles. `C-U` is the shape this app used
+ * to write for that same combination, so it is kept as an alias and gets renamed to `UC` on a
+ * re-scrape.
+ */
+const UMR_TOKEN_PATTERN = new RegExp(
+  `(?:^|${FILENAME_DELIMITER_SOURCE})(?:${CRACKED_CU_TOKEN_SOURCE}|UC|UMR|破解|U)(?:$|${FILENAME_DELIMITER_SOURCE})`,
   "iu",
 );
-const UMR_PATTERN = new RegExp(
-  `(?:^|${FILENAME_DELIMITER_SOURCE})(?:${CRACKED_CU_TOKEN_SOURCE}|UMR|破解)(?:$|${FILENAME_DELIMITER_SOURCE})`,
+/**
+ * The UMR half of a marker, so the Chinese-subtitle probe never sees it. `C` and the `C` of `UC` must
+ * survive: they are the subtitle marker. Matched through lookarounds so the surrounding delimiters
+ * stay put and the remaining tokens keep their word boundaries.
+ */
+const UMR_ONLY_TOKEN_PATTERN = new RegExp(
+  `(?<=^|${FILENAME_DELIMITER_SOURCE})(?:UMR|破解|U)(?=$|${FILENAME_DELIMITER_SOURCE})`,
+  "giu",
+);
+/**
+ * Uncensored without saying which kind, which is what leaves a file `uncensoredAmbiguous` and asks the
+ * user to pick. Spelled out on purpose: the short `U` is UMR, so the unspecified case needs a token of
+ * its own — it is also what makes a `naming.uncensoredStyle` of `-无码` survive a re-scrape.
+ */
+const UNCENSORED_TOKEN_PATTERN = new RegExp(
+  `(?:^|${FILENAME_DELIMITER_SOURCE})(?:UNCENSORED|无码)(?:$|${FILENAME_DELIMITER_SOURCE})`,
   "iu",
 );
 const RESOLUTION_PATTERNS = [/\b8K\b/iu, /\b4K\b/iu, /\b2160P\b/iu, /\b1080P\b/iu, /\b720P\b/iu];
@@ -39,7 +54,7 @@ const FC2_RAW_NUMBER_WITH_CIRCLED_SUFFIX_PATTERN = new RegExp(
 const TRAILING_SUBTITLE_PATTERN = new RegExp(`${FILENAME_DELIMITER_SOURCE}(?:${SUBTITLE_TOKEN_SOURCE})$`, "iu");
 const TRAILING_ATTACHED_CHINESE_SUBTITLE_PATTERN = /(?<=\d)(?:CHS|CH)$/iu;
 const TRAILING_UMR_PATTERN = new RegExp(`${FILENAME_DELIMITER_SOURCE}(?:${CRACKED_CU_TOKEN_SOURCE}|UMR|破解)$`, "iu");
-const TRAILING_UNCENSORED_PATTERN = /[-_.\s]U$/iu;
+const TRAILING_UNCENSORED_PATTERN = new RegExp(`${FILENAME_DELIMITER_SOURCE}(?:UNCENSORED|无码|U)$`, "iu");
 const TRAILING_PART_PATTERN = /[-_.\s](?:CD|PART|EP)[-_\s]?\d{1,2}$/iu;
 const TRAILING_FC2_JP_PART_PATTERN = /[-_.\s](?:前番|前編|後番|後編)$/u;
 const TRAILING_BARE_PART_PATTERN = /[-_.\s][1-9]$/u;
@@ -328,12 +343,11 @@ export const parseFileInfo = (filePath: string, escapeStrings: string[] = []): F
   const normalizedStem = stem.normalize("NFC");
   const normalizedUpper = normalizedStem.toUpperCase();
 
-  const crackedCuMatch = normalizedUpper.match(CRACKED_CU_PATTERN);
+  const umrMatch = normalizedUpper.match(UMR_TOKEN_PATTERN);
+  const uncensoredMatch = umrMatch ? null : normalizedUpper.match(UNCENSORED_TOKEN_PATTERN);
   const subtitleTag = detectChineseSubtitleTagInFileName(
-    crackedCuMatch ? normalizedStem.replace(CRACKED_CU_PATTERN, "") : normalizedStem,
+    umrMatch ? normalizedStem.replace(UMR_ONLY_TOKEN_PATTERN, "") : normalizedStem,
   );
-  const uncensoredMatch = normalizedUpper.match(UNCENSORED_PATTERN);
-  const umrMatch = normalizedStem.match(UMR_PATTERN);
   const resolutionMatch = RESOLUTION_PATTERNS.map((pattern) => normalizedUpper.match(pattern)).find(Boolean);
   const number = extractNumber(normalizedStem, escapeStrings);
   const part =
@@ -349,7 +363,9 @@ export const parseFileInfo = (filePath: string, escapeStrings: string[] = []): F
     number,
     isSubtitled: Boolean(subtitleTag),
     subtitleTag,
-    isUncensored: Boolean(uncensoredMatch || umrMatch),
+    nativeSubtitled: Boolean(subtitleTag),
+    subtitleOrigin: subtitleTag ? "embedded" : undefined,
+    isUncensored: Boolean(umrMatch || uncensoredMatch),
     filenameUncensoredChoice: umrMatch ? "umr" : uncensoredMatch ? "uncensored" : undefined,
     resolution: resolutionMatch?.[0],
     part,

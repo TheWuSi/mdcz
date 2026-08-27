@@ -3,6 +3,7 @@ import { dirname, extname, normalize, resolve } from "node:path";
 import { toErrorMessage } from "@mdcz/shared/error";
 import {
   buildGeneratedVideoSidecarTargetPath,
+  buildSubtitleSidecarEmbyTargetPaths,
   buildSubtitleSidecarTargetPath,
   type SubtitleSidecarMatch,
 } from "../media";
@@ -20,6 +21,19 @@ type MovedArtifact = {
   label: string;
 };
 
+/**
+ * Resolves the on-disk name for every subtitle sidecar, honouring the EMBY layout when enabled.
+ * `PathPlanner` runs the identical mapping over the same ordered list so both agree.
+ */
+const resolveSubtitleTargetPaths = (
+  sidecars: readonly SubtitleSidecarMatch[],
+  targetVideoPath: string,
+  embySubtitleNaming: boolean,
+): string[] =>
+  embySubtitleNaming
+    ? buildSubtitleSidecarEmbyTargetPaths(sidecars, targetVideoPath)
+    : sidecars.map((sidecar) => buildSubtitleSidecarTargetPath(sidecar, targetVideoPath));
+
 export class FileMover {
   constructor(
     private readonly logger: OrganizeLogger,
@@ -32,6 +46,7 @@ export class FileMover {
     options: {
       subtitleSidecars?: SubtitleSidecarMatch[];
       sharedMovieBaseName: string;
+      embySubtitleNaming?: boolean;
     },
   ): Promise<string> {
     const sidecars = await this.sidecarResolver.resolve(sourceVideoPath, options.subtitleSidecars);
@@ -55,9 +70,13 @@ export class FileMover {
         this.logger.info(`Rewrote relative STRM target to absolute path: ${movedVideoPath}`);
       }
 
-      for (const subtitleSidecar of sidecars.subtitleSidecars) {
-        const targetSubtitlePath = buildSubtitleSidecarTargetPath(subtitleSidecar, movedVideoPath);
-        const movedSubtitlePath = await moveFileSafely(subtitleSidecar.path, targetSubtitlePath);
+      const subtitleTargetPaths = resolveSubtitleTargetPaths(
+        sidecars.subtitleSidecars,
+        movedVideoPath,
+        Boolean(options.embySubtitleNaming),
+      );
+      for (const [index, subtitleSidecar] of sidecars.subtitleSidecars.entries()) {
+        const movedSubtitlePath = await moveFileSafely(subtitleSidecar.path, subtitleTargetPaths[index]);
         movedArtifacts.push({
           sourcePath: subtitleSidecar.path,
           targetPath: movedSubtitlePath,
@@ -101,7 +120,11 @@ export class FileMover {
   async createSeparatedStrmBundle(
     sourceVideoPath: string,
     targetStrmPath: string,
-    options: { subtitleSidecars?: SubtitleSidecarMatch[]; sharedMovieBaseName: string },
+    options: {
+      subtitleSidecars?: SubtitleSidecarMatch[];
+      sharedMovieBaseName: string;
+      embySubtitleNaming?: boolean;
+    },
   ): Promise<string> {
     const sidecars = await this.sidecarResolver.resolve(sourceVideoPath, options.subtitleSidecars);
     const copied: string[] = [];
@@ -122,8 +145,14 @@ export class FileMover {
         copied.push(targetStrmPath);
       }
 
-      for (const subtitle of sidecars.subtitleSidecars) {
-        const target = buildSubtitleSidecarTargetPath(subtitle, targetStrmPath);
+      // Separated mode copies out of the source directory and never writes back into it.
+      const subtitleTargets = resolveSubtitleTargetPaths(
+        sidecars.subtitleSidecars,
+        targetStrmPath,
+        Boolean(options.embySubtitleNaming),
+      );
+      for (const [index, subtitle] of sidecars.subtitleSidecars.entries()) {
+        const target = subtitleTargets[index];
         await copyFile(subtitle.path, target);
         copied.push(target);
       }

@@ -15,6 +15,7 @@ import type { AggregationResult, ManualScrapeOptions } from "../aggregation";
 import type { OrganizePlan } from "../FileOrganizer";
 import type { ScrapeExecutionMode } from "../FileScraper";
 import { type FileInfoWithSubtitles, resolveFileInfoWithSubtitles, type SubtitleSidecarMatch } from "../media";
+import type { DownloadedSubtitle } from "../subtitles/types";
 import { parseFileInfo } from "../utils/number";
 
 export class ScrapeContext {
@@ -51,6 +52,9 @@ export class ScrapeContext {
   assets?: DownloadedAssets;
 
   savedNfoPath?: string;
+
+  /** Filled by `SubtitleStage`; written next to the final playable entry by `OrganizeStage`. */
+  downloadedSubtitle?: DownloadedSubtitle;
 
   outputVideoPath?: string;
 

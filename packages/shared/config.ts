@@ -87,7 +87,9 @@ const namingSchema = z.object({
   folderNameMax: z.number().int().min(10).max(255).default(60),
   fileNameMax: z.number().int().min(10).max(255).default(60),
   cnwordStyle: z.string().default("-C"),
-  umrStyle: z.string().default("-破解"),
+  // Pairs with `cnwordStyle` so a UMR release with burned-in subtitles reads as the conventional
+  // `-UC` instead of two separate markers. See `buildNamingMarkers()` in NamingEngine.
+  umrStyle: z.string().default("-U"),
   leakStyle: z.string().default("-流出"),
   uncensoredStyle: z.string().default(""),
   censoredStyle: z.string().default(""),
@@ -123,6 +125,12 @@ const downloadSchema = z.object({
   downloadFanart: z.boolean().default(true),
   downloadSceneImages: z.boolean().default(true),
   downloadTrailer: z.boolean().default(true),
+  /** Fetch a Chinese subtitle from SubtitleCat when the source has no native `-C` marker. */
+  subtitleCat: z.boolean().default(true),
+  /** Accept a traditional-Chinese (zh-TW) subtitle when no simplified one is available. */
+  subtitleCatFallbackTraditional: z.boolean().default(true),
+  /** Rename local sidecar subtitles to the EMBY `[Video].[Language].[SourceTag].[Ext]` layout. */
+  embySubtitleNaming: z.boolean().default(true),
   generateNfo: z.boolean().default(true),
   nfoNaming: z.enum(NFO_NAMING_OPTIONS).default("both"),
   nfoIgnoreFields: z.array(z.enum(NFO_FIELD_OPTIONS)).default([]),

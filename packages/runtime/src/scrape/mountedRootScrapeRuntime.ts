@@ -32,9 +32,12 @@ import {
   ProbeStage,
   type RuntimeScrapeSignalService,
   ScrapeContext,
+  ScrapeSessionScope,
   type ScrapeStage,
+  SubtitleStage,
   TranslateStage,
 } from "./pipeline";
+import { fetchSubtitleCatSubtitleForNumber } from "./subtitles";
 import { TranslateService } from "./TranslateService";
 import type { TranslationMappingStore } from "./translate/types";
 import { isAbortError } from "./utils/abort";
@@ -169,7 +172,8 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
   private readonly actorImageService: ActorImageService;
   private readonly posterWatermarkService: PosterWatermarkService;
   private readonly aggregationCoordinator: AggregationCoordinator;
-  private readonly numberExecutionGate = new NumberExecutionGate();
+  private readonly numberExecutionGate: NumberExecutionGate;
+  private readonly runtimeLogger: ReturnType<typeof toRuntimeLogger>;
 
   readonly stages: readonly ScrapeStage[];
 
@@ -184,12 +188,15 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
     mappingStore?: TranslationMappingStore,
     imageHostCooldownStore: ImageHostCooldownStore = new MemoryImageHostCooldownStore(),
     private readonly actorSourceProvider?: RuntimeActorSourceProvider,
+    private readonly sessionScope?: ScrapeSessionScope,
   ) {
     this.networkClient = networkClient ?? new NetworkClient();
     const runtimeLogger = toRuntimeLogger(this.logger);
+    this.runtimeLogger = runtimeLogger;
     this.fileOrganizer = new FileOrganizer(runtimeLogger);
     this.translateService = new TranslateService(this.networkClient, { logger: runtimeLogger, mappingStore });
     this.downloadManager = new DownloadManager(this.networkClient, {
+      assetCache: sessionScope?.assetCache,
       imageHostCooldownStore,
       logger: runtimeLogger,
     });
@@ -199,7 +206,10 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
       networkClient: this.networkClient,
     });
     this.posterWatermarkService = new PosterWatermarkService({ dataDir: this.config.runtimePaths.dataDir });
-    this.aggregationCoordinator = new AggregationCoordinator(this.aggregationService);
+    // One pipeline is built per file here, so without a session scope every cache would be single-use.
+    this.aggregationCoordinator =
+      sessionScope?.aggregationCoordinator ?? new AggregationCoordinator(this.aggregationService);
+    this.numberExecutionGate = sessionScope?.numberExecutionGate ?? new NumberExecutionGate();
     this.stages = this.createStages();
   }
 
@@ -310,6 +320,15 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
           actorPhotoPaths: prepared.actorPhotoPaths,
         };
       },
+      fetchSubtitleCatSubtitle: async (context, signal) =>
+        await fetchSubtitleCatSubtitleForNumber({
+          configuration: context.requireConfiguration(),
+          logger: this.runtimeLogger,
+          networkClient: this.networkClient,
+          number: context.fileInfo.number,
+          signal,
+          subtitleCache: this.sessionScope?.subtitleCache,
+        }),
       downloadCrawlerAssets: async (context, signal) => await this.downloadCrawlerAssets(context, signal),
       writePreparedNfo: async (context) => await this.writePreparedNfo(context),
       organizePreparedVideo: async (context) =>
@@ -326,6 +345,7 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
       new TranslateStage(runtime),
       new CanonicalizeActorAliasesStage(),
       new PlanStage(runtime),
+      new SubtitleStage(runtime),
       new PrepareOutputStage(runtime),
       new DownloadStage(runtime),
       new NfoStage(runtime),
@@ -447,7 +467,31 @@ class MountedRootFileScraperPipeline implements FileScraperPipeline {
   }
 }
 
+interface SessionScopeEntry {
+  scope: ScrapeSessionScope;
+  /** Files of this session currently inside `scrape()`. */
+  activeCount: number;
+  /** Wall clock of the moment `activeCount` last hit zero. */
+  idleSince?: number;
+  /** `releaseSession()` has been called; the last file out disposes the scope. */
+  retired: boolean;
+}
+
+/**
+ * Backstop for tasks that never reach `releaseSession()` (crash, hard stop, dropped connection).
+ * Only applies once every file the task submitted has finished — see `#evictIdleScopes()`.
+ */
+const SESSION_SCOPE_IDLE_TTL_MS = 30 * 60 * 1000;
+
 export class MountedRootScrapeRuntime {
+  /**
+   * Ref-counted scopes keyed by scrape session id, so every file of one task shares its metadata,
+   * artwork and subtitle caches. Deliberately per task and never process-wide: `AggregationCoordinator`
+   * keeps successful results for the scope's whole lifetime, so a longer-lived scope would hand
+   * hours-old metadata to a re-scrape.
+   */
+  readonly #scopes = new Map<string, SessionScopeEntry>();
+
   constructor(
     private readonly config: MountedRootScrapeRuntimeConfig,
     private readonly aggregationService: MountedRootScrapeAggregationService,
@@ -458,6 +502,29 @@ export class MountedRootScrapeRuntime {
     private readonly actorSourceProvider?: RuntimeActorSourceProvider,
   ) {}
 
+  /**
+   * Records the files a task submitted, so the scope's same-number grouping comes from the task list
+   * instead of from whichever files the worker pool happens to run together. Call it before executing
+   * the task; `releaseSession()` still does the teardown.
+   */
+  beginSession(
+    scrapeSessionId: string | undefined,
+    absoluteFilePaths: readonly string[],
+    escapeStrings: readonly string[] = [],
+  ): void {
+    if (!scrapeSessionId) {
+      return;
+    }
+
+    const entry: SessionScopeEntry = this.#scopes.get(scrapeSessionId) ?? {
+      activeCount: 0,
+      retired: false,
+      scope: new ScrapeSessionScope(this.aggregationService),
+    };
+    entry.scope.groups.seed(absoluteFilePaths, escapeStrings);
+    this.#scopes.set(scrapeSessionId, entry);
+  }
+
   async scrape(input: MountedRootScrapeRuntimeItemInput): Promise<MountedRootScrapeRuntimeItemResult> {
     const signalService = new MountedRootScrapeSignalService(
       (type, message) => {
@@ -467,6 +534,7 @@ export class MountedRootScrapeRuntime {
       (progress) => input.onProgress?.(progress),
       (stage, message) => input.onStage?.(stage, message),
     );
+    const session = this.#acquireSessionScope(input.scrapeSessionId);
     try {
       const scraper = new FileScraper(
         new MountedRootFileScraperPipeline(
@@ -480,6 +548,7 @@ export class MountedRootScrapeRuntime {
           this.mappingStore,
           this.imageHostCooldownStore,
           this.actorSourceProvider,
+          session.scope,
         ),
       );
       const absolutePath = resolveRootRelativePath(input.root, input.relativePath);
@@ -520,6 +589,89 @@ export class MountedRootScrapeRuntime {
       };
     } finally {
       await signalService.flush();
+      session.scope.groups.complete(resolveRootRelativePath(input.root, input.relativePath));
+      await session.release();
+    }
+  }
+
+  /**
+   * Drops the caches a finished task built up. Call this from the task runner's `finally` so the
+   * stop / pause / failure paths release too. Idempotent, and safe to call while files are still
+   * in flight — the last one out does the actual teardown.
+   */
+  async releaseSession(scrapeSessionId: string | undefined): Promise<void> {
+    if (!scrapeSessionId) {
+      return;
+    }
+
+    const entry = this.#scopes.get(scrapeSessionId);
+    if (!entry) {
+      return;
+    }
+
+    entry.retired = true;
+    if (entry.activeCount > 0) {
+      return;
+    }
+    await this.#disposeScopeEntry(scrapeSessionId, entry);
+  }
+
+  /** Sessions without an id get a private scope: one file, nothing to share. */
+  #acquireSessionScope(scrapeSessionId?: string): { scope: ScrapeSessionScope; release: () => Promise<void> } {
+    if (!scrapeSessionId) {
+      const scope = new ScrapeSessionScope(this.aggregationService);
+      return { scope, release: async () => await scope.dispose() };
+    }
+
+    this.#evictIdleScopes();
+    const entry: SessionScopeEntry = this.#scopes.get(scrapeSessionId) ?? {
+      activeCount: 0,
+      retired: false,
+      scope: new ScrapeSessionScope(this.aggregationService),
+    };
+    entry.activeCount += 1;
+    entry.idleSince = undefined;
+    this.#scopes.set(scrapeSessionId, entry);
+    return { scope: entry.scope, release: async () => await this.#releaseScopeEntry(scrapeSessionId, entry) };
+  }
+
+  async #releaseScopeEntry(scrapeSessionId: string, entry: SessionScopeEntry): Promise<void> {
+    entry.activeCount = Math.max(0, entry.activeCount - 1);
+    if (entry.activeCount > 0) {
+      return;
+    }
+
+    entry.idleSince = Date.now();
+    if (entry.retired) {
+      // `releaseSession()` ran while this file was still going; disposing earlier would have pulled
+      // the cached asset files out from under it.
+      await this.#disposeScopeEntry(scrapeSessionId, entry);
+    }
+  }
+
+  async #disposeScopeEntry(scrapeSessionId: string, entry: SessionScopeEntry): Promise<void> {
+    if (this.#scopes.get(scrapeSessionId) === entry) {
+      this.#scopes.delete(scrapeSessionId);
+    }
+    try {
+      await entry.scope.dispose();
+    } catch (error) {
+      this.logger.warn(`Failed to dispose scrape session scope ${scrapeSessionId}: ${String(error)}`);
+    }
+  }
+
+  /**
+   * Reaps scopes whose task died without releasing. Runs on acquire, so it costs nothing when idle.
+   * A scope with files still to come is never reaped, however long the gap between them: dropping it
+   * mid-task would make the surviving variants of a base code re-aggregate and re-download.
+   */
+  #evictIdleScopes(): void {
+    const now = Date.now();
+    for (const [scrapeSessionId, entry] of [...this.#scopes]) {
+      const idleFor = entry.idleSince === undefined ? 0 : now - entry.idleSince;
+      if (entry.activeCount === 0 && !entry.scope.groups.hasPending() && idleFor > SESSION_SCOPE_IDLE_TTL_MS) {
+        void this.#disposeScopeEntry(scrapeSessionId, entry);
+      }
     }
   }
 }

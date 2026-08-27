@@ -178,7 +178,8 @@ describe("FileOrganizer filesystem organize", () => {
     await expect(readFile(sourcePath, "utf8")).resolves.toBe("video");
     await expect(readFile(subtitlePath, "utf8")).resolves.toBe("subtitle");
     await expect(readFile(strmPath, "utf8")).resolves.toBe(resolve(sourcePath));
-    await expect(readFile(join(dirname(strmPath), "ABC-123-CEN.zh.srt"), "utf8")).resolves.toBe("subtitle");
+    // The copy follows the EMBY layout while the source sidecar stays exactly where it was.
+    await expect(readFile(join(dirname(strmPath), "ABC-123-CEN.zh-CN.src.srt"), "utf8")).resolves.toBe("subtitle");
     expect(plan.strmPath).toBeUndefined();
   });
 
@@ -304,7 +305,7 @@ describe("FileOrganizer filesystem organize", () => {
     await organizer.organizeVideo(fileInfo, preparedPlan, successConfig);
 
     await expectPathExists(join(root, "output", "XYZ-999-CEN", "XYZ-999-CEN.mp4"));
-    await expectPathExists(join(root, "output", "XYZ-999-CEN", "XYZ-999-CEN.zh.srt"));
+    await expectPathExists(join(root, "output", "XYZ-999-CEN", "XYZ-999-CEN.zh-CN.src.srt"));
     await expect(access(subtitlePath)).rejects.toThrow();
   });
 

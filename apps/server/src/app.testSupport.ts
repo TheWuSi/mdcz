@@ -61,6 +61,9 @@ export const createTestServer = async (options: TestServerOptions = {}): Promise
     databasePath: join(directory.path, "data", "mdcz.sqlite"),
   };
   const config = new ServerConfigService(paths);
+  // SubtitleCat ships enabled, but the suite must stay offline: leaving it on makes every scrape
+  // reach subtitlecat.com and blow past the task-status poll timeout.
+  await config.update({ download: { subtitleCat: false } });
   const persistence = new ServerPersistenceService(paths);
   const mediaRoots = new MediaRootService(persistence);
   const taskEvents = createTaskEventBus();

@@ -34,6 +34,14 @@ export const resolveFileInfoWithSubtitles = async (
       ...parsedFileInfo,
       isSubtitled: parsedFileInfo.isSubtitled || subtitleSidecars.length > 0,
       subtitleTag,
+      // Provenance must survive the merge: a sidecar-derived tag is external, never
+      // native, so downstream naming keeps the source number untouched.
+      nativeSubtitled: parsedFileInfo.nativeSubtitled,
+      subtitleOrigin: parsedFileInfo.nativeSubtitled
+        ? "embedded"
+        : subtitleSidecars.length > 0
+          ? "external"
+          : undefined,
     },
     subtitleSidecars,
   };

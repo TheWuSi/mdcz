@@ -11,6 +11,7 @@ import {
   DownloadStage,
   type FileScraperPipeline,
   type FileScraperStageRuntime,
+  fetchSubtitleCatSubtitleForNumber,
   NfoStage,
   NumberExecutionGate,
   OrganizeStage,
@@ -21,6 +22,7 @@ import {
   resolveMetadataOutputDir,
   ScrapeContext,
   type ScrapeStage,
+  SubtitleStage,
   TranslateStage,
 } from "@mdcz/runtime/scrape";
 import type { CrawlerData, NfoLocalState, ScrapeResult } from "@mdcz/shared/types";
@@ -49,7 +51,7 @@ export class DefaultFileScraperPipeline implements FileScraperPipeline {
 
   private readonly aggregationCoordinator: AggregationCoordinator;
 
-  private readonly numberExecutionGate = new NumberExecutionGate();
+  private readonly numberExecutionGate: NumberExecutionGate;
 
   private readonly failureHandler: ScrapeFailureHandler;
 
@@ -62,7 +64,10 @@ export class DefaultFileScraperPipeline implements FileScraperPipeline {
   ) {
     this.actorImageService = deps.actorImageService ?? new ActorImageService();
     this.localScanService = deps.localScanService ?? new LocalScanService();
-    this.aggregationCoordinator = new AggregationCoordinator(deps.aggregationService);
+    // Without a session scope this pipeline is the only owner, so private instances behave identically.
+    this.aggregationCoordinator =
+      deps.sessionScope?.aggregationCoordinator ?? new AggregationCoordinator(deps.aggregationService);
+    this.numberExecutionGate = deps.sessionScope?.numberExecutionGate ?? new NumberExecutionGate();
     this.failureHandler = new ScrapeFailureHandler(deps.fileOrganizer, this.logger, deps.signalService);
     this.stages = this.createStages();
   }
@@ -107,6 +112,7 @@ export class DefaultFileScraperPipeline implements FileScraperPipeline {
   }
 
   private createStageRuntime(): FileScraperStageRuntime {
+    const { networkClient } = this.deps;
     return {
       actorImageService: this.actorImageService,
       actorSourceProvider: this.deps.actorSourceProvider,
@@ -154,6 +160,17 @@ export class DefaultFileScraperPipeline implements FileScraperPipeline {
           actorPhotoPaths: prepared.actorPhotoPaths,
         };
       },
+      fetchSubtitleCatSubtitle: networkClient
+        ? async (context, signal) =>
+            await fetchSubtitleCatSubtitleForNumber({
+              configuration: context.requireConfiguration(),
+              logger: this.logger,
+              networkClient,
+              number: context.fileInfo.number,
+              signal,
+              subtitleCache: this.deps.sessionScope?.subtitleCache,
+            })
+        : undefined,
       downloadCrawlerAssets: async (context, signal) => {
         const aggregationResult = context.requireAggregationResult();
         const crawlerData = context.requireCrawlerData();
@@ -225,6 +242,7 @@ export class DefaultFileScraperPipeline implements FileScraperPipeline {
       new TranslateStage(runtime),
       new CanonicalizeActorAliasesStage(),
       new PlanStage(runtime),
+      new SubtitleStage(runtime),
       new PrepareOutputStage(runtime),
       new DownloadStage(runtime),
       new NfoStage(runtime),

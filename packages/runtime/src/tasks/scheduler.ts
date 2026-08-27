@@ -33,6 +33,14 @@ export class TaskScheduler<TExecution extends SchedulableExecution> {
     this.stopRequested = true;
   }
 
+  /**
+   * Lets a long `runExecution()` bail out before it starts real work. The scheduler itself only
+   * checks between executions, so a shutdown that lands mid-execution is invisible without this.
+   */
+  get isStopRequested(): boolean {
+    return this.stopRequested;
+  }
+
   get isRunning(): boolean {
     return this.activeDrain !== null;
   }

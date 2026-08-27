@@ -48,7 +48,7 @@ export const POSTER_TAG_BADGE_IMAGE_EXTENSIONS = ["png", "webp", "jpg", "jpeg"] 
 export type PosterTagBadgeImageExtension = (typeof POSTER_TAG_BADGE_IMAGE_EXTENSIONS)[number];
 
 export const POSTER_TAG_BADGE_IMAGE_FILENAMES: Record<PosterTagBadgeType, readonly string[]> = {
-  subtitle: ["subtitle", "中字"],
+  subtitle: ["sub", "subtitle", "中字"],
   censored: ["censored", "有码"],
   umr: ["umr", "破解"],
   leak: ["leak", "流出"],
@@ -56,6 +56,27 @@ export const POSTER_TAG_BADGE_IMAGE_FILENAMES: Record<PosterTagBadgeType, readon
   fullHd: ["fullHd", "1080P"],
   fourK: ["fourK", "4K"],
   eightK: ["eightK", "8K"],
+};
+
+/** Where the Chinese subtitles come from, which decides both the badge label and its image. */
+export type PosterTagBadgeSubtitleVariant = "embedded" | "external";
+
+export const POSTER_TAG_BADGE_SUBTITLE_VARIANT_LABELS: Record<PosterTagBadgeSubtitleVariant, string> = {
+  embedded: "内嵌中字",
+  external: "外挂中字",
+};
+
+/**
+ * Two-image mode: dropping `sub_embedded.png` / `sub_external.png` into the watermark directory makes
+ * the two kinds of Chinese subtitles distinguishable. Falling back to the shared
+ * `POSTER_TAG_BADGE_IMAGE_FILENAMES.subtitle` names keeps single-image setups working untouched.
+ */
+export const POSTER_TAG_BADGE_SUBTITLE_VARIANT_IMAGE_FILENAMES: Record<
+  PosterTagBadgeSubtitleVariant,
+  readonly string[]
+> = {
+  embedded: ["sub_embedded", "subtitle_embedded", "内嵌中字"],
+  external: ["sub_external", "subtitle_external", "外挂中字"],
 };
 
 export const POSTER_TAG_BADGE_POSITION_LABELS: Record<PosterTagBadgePosition, string> = {

@@ -5,6 +5,7 @@ import type { ScrapeStage } from "./types";
 
 export { AggregateStage } from "./AggregateStage";
 export { AggregationCoordinator } from "./AggregationCoordinator";
+export { BaseCodeGroupPlan } from "./BaseCodeGroupPlan";
 export { CanonicalizeActorAliasesStage } from "./CanonicalizeActorAliasesStage";
 export { DownloadStage } from "./DownloadStage";
 export { NfoStage } from "./NfoStage";
@@ -15,6 +16,8 @@ export { PlanStage } from "./PlanStage";
 export { PrepareOutputStage } from "./PrepareOutputStage";
 export { ProbeStage } from "./ProbeStage";
 export { ScrapeContext } from "./ScrapeContext";
+export { ScrapeSessionScope } from "./ScrapeSessionScope";
+export { SubtitleStage } from "./SubtitleStage";
 export { TranslateStage } from "./TranslateStage";
 export type { FileScraperStageRuntime, RuntimeScrapeSignalService, ScrapeStage } from "./types";
 

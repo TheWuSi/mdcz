@@ -27,6 +27,8 @@ describe("FileOrganizer naming rules", () => {
         fileInfo: createFileInfo({
           isSubtitled: true,
           subtitleTag: "中文字幕",
+          nativeSubtitled: true,
+          subtitleOrigin: "embedded",
         }),
         crawlerData: createCrawlerData({
           number: "FC2-123456",
@@ -105,6 +107,68 @@ describe("FileOrganizer naming rules", () => {
     for (const { config, fileInfo, crawlerData, assert } of cases) {
       assert(organizer.plan(fileInfo, crawlerData, config));
     }
+  });
+
+  it("merges short censorship and subtitle markers into one suffix", () => {
+    const organizer = new FileOrganizer();
+    const markerConfig = (umrStyle: string) =>
+      createConfig({ naming: { cnwordStyle: "-C", umrStyle, uncensoredStyle: "", censoredStyle: "" } });
+    const plannedName = (filePath: string, umrStyle: string) =>
+      parse(organizer.plan(parseFileInfo(filePath), createCrawlerData(), markerConfig(umrStyle)).targetVideoPath).name;
+
+    // `-UC` is UMR plus burned-in subtitles, and the two short markers read as one suffix.
+    const merged = organizer.plan(parseFileInfo("/input/ABC-123-UC.mp4"), createCrawlerData(), markerConfig("-U"));
+    expect(parse(merged.targetVideoPath).name).toBe("ABC-123-UC");
+    expect(parse(merged.outputDir).base).toBe("ABC-123-UC");
+
+    // The legacy `-C-U` shape normalizes onto the same name instead of drifting further.
+    expect(plannedName("/input/ABC-123-C-U.mp4", "-U")).toBe("ABC-123-UC");
+    // A long marker stays a marker of its own, so existing libraries keep their names.
+    expect(plannedName("/input/ABC-123-UC.mp4", "-UMR")).toBe("ABC-123-C-UMR");
+    // Without a subtitle marker there is nothing to merge into.
+    expect(plannedName("/input/ABC-123-U.mp4", "-U")).toBe("ABC-123-U");
+  });
+
+  it("only appends the cnword marker when the source filename natively carried it", () => {
+    const organizer = new FileOrganizer();
+    const config = createConfig({ naming: { cnwordStyle: "-C", censoredStyle: "" } });
+
+    // Sidecar-derived tag: `resolveFileInfoWithSubtitles` promotes `subtitleTag` so the
+    // NFO still records 中文字幕, but the number must stay exactly as the source had it.
+    const externalPlan = organizer.plan(
+      createFileInfo({
+        isSubtitled: true,
+        subtitleTag: "中文字幕",
+        nativeSubtitled: false,
+        subtitleOrigin: "external",
+      }),
+      createCrawlerData({ number: "ABC-111" }),
+      config,
+    );
+    expect(parse(externalPlan.targetVideoPath).name).toBe("ABC-111");
+    expect(parse(externalPlan.outputDir).base).not.toContain("-C");
+
+    // Legacy fileInfo objects predating the provenance fields must also stay unchanged.
+    const legacyPlan = organizer.plan(
+      createFileInfo({ isSubtitled: true, subtitleTag: "中文字幕" }),
+      createCrawlerData({ number: "ABC-111" }),
+      config,
+    );
+    expect(parse(legacyPlan.targetVideoPath).name).toBe("ABC-111");
+
+    const nativePlan = organizer.plan(
+      createFileInfo({
+        filePath: "/input/ABC-111-C.mp4",
+        fileName: "ABC-111-C",
+        isSubtitled: true,
+        subtitleTag: "中文字幕",
+        nativeSubtitled: true,
+        subtitleOrigin: "embedded",
+      }),
+      createCrawlerData({ number: "ABC-111" }),
+      config,
+    );
+    expect(parse(nativePlan.targetVideoPath).name).toBe("ABC-111-C");
   });
 
   it("keeps slash characters inside metadata from creating nested folders", () => {
@@ -534,6 +598,8 @@ describe("FileOrganizer naming rules", () => {
         fileName: "raw-source",
         isSubtitled: true,
         subtitleTag: "中文字幕",
+        nativeSubtitled: true,
+        subtitleOrigin: "embedded",
         resolution: "2160P",
       }),
       createCrawlerData({

@@ -10,6 +10,7 @@ import {
   validateImage,
 } from "../utils/image";
 import type { ImageHostCooldownTracker } from "./ImageHostCooldownTracker";
+import type { CachedScrapeAsset, ScrapeAssetCache } from "./ScrapeAssetCache";
 
 interface DownloadLogger {
   warn(message: string): void;
@@ -48,6 +49,8 @@ export class ImageDownloadService {
     private readonly networkClient: RuntimeDownloadNetworkClient,
     private readonly hostCooldown: ImageHostCooldownTracker,
     private readonly logger: DownloadLogger,
+    /** Shared across one scrape session so base-code variants download each URL only once. */
+    private readonly assetCache?: ScrapeAssetCache,
   ) {}
 
   async downloadBestImage(candidates: string[], outputPath: string, signal?: AbortSignal): Promise<string | undefined> {
@@ -84,6 +87,86 @@ export class ImageDownloadService {
     options: { timeoutMs?: number; minBytes?: number; signal?: AbortSignal } = {},
   ): Promise<DownloadValidatedImageResult> {
     throwIfAborted(options.signal);
+    if (!this.assetCache) {
+      return await this.downloadAndValidateImage(url, outputPath, options);
+    }
+
+    return await this.downloadValidatedImageCandidateViaCache(this.assetCache, url, outputPath, options);
+  }
+
+  /**
+   * Serves the URL from the session cache when a sibling variant already fetched it, and seeds the
+   * cache otherwise. A cache miss behaves exactly like an uncached download: the bytes land straight
+   * in `outputPath` and only a copy is kept for the next task.
+   */
+  private async downloadValidatedImageCandidateViaCache(
+    cache: ScrapeAssetCache,
+    url: string,
+    outputPath: string,
+    options: { timeoutMs?: number; minBytes?: number; signal?: AbortSignal },
+  ): Promise<DownloadValidatedImageResult> {
+    const pending = cache.get(url);
+    if (pending) {
+      const cached = await pending;
+      throwIfAborted(options.signal);
+      // A failed entry has already been forgotten by the cache, so falling through retries it.
+      if (cached) {
+        return await this.copyCachedImage(cached, outputPath);
+      }
+    }
+
+    let outcome: DownloadValidatedImageResult | undefined;
+    const request = (async (): Promise<CachedScrapeAsset | null> => {
+      const result = await this.downloadAndValidateImage(url, outputPath, options);
+      outcome = result;
+      if (result.status !== "downloaded") {
+        return null;
+      }
+
+      const asset = { path: result.path, width: result.width, height: result.height, format: result.format };
+      return await cache.put(url, asset, async (targetPath) => await this.copyCachedAsset(result.path, targetPath));
+    })();
+    cache.track(url, request);
+
+    await request;
+    return outcome ?? { status: "skipped", reason: "download_failed" };
+  }
+
+  private async copyCachedImage(
+    cached: CachedScrapeAsset,
+    outputPath: string,
+  ): Promise<DownloadValidatedImageResult> {
+    const targetPath = this.resolveImageOutputPath(outputPath, cached.format);
+    const copiedPath = await this.copyDerivedImage(cached.path, targetPath, "cached");
+    if (!copiedPath) {
+      return { status: "skipped", reason: "download_failed" };
+    }
+
+    return {
+      status: "downloaded",
+      path: copiedPath,
+      width: cached.width,
+      height: cached.height,
+      format: cached.format,
+    };
+  }
+
+  /** Seeding the cache is best effort: a failure only costs the next variant a fresh download. */
+  private async copyCachedAsset(sourcePath: string, targetPath: string): Promise<string | null> {
+    try {
+      await copyFile(sourcePath, targetPath);
+      return targetPath;
+    } catch (error) {
+      this.logger.warn(`Failed to cache downloaded image: ${toErrorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async downloadAndValidateImage(
+    url: string,
+    outputPath: string,
+    options: { timeoutMs?: number; minBytes?: number; signal?: AbortSignal },
+  ): Promise<DownloadValidatedImageResult> {
     const downloadResult = await this.downloadFile(url, outputPath, options);
     if (downloadResult.status !== "downloaded") {
       return downloadResult;

@@ -15,6 +15,7 @@ import {
   createTestPngBytes,
   createTestServer,
   loginAsAdmin,
+  startLocalHttpServer,
   startTestImageServer,
   syncMediaRootFromConfig,
   waitForTaskStatus,
@@ -426,6 +427,66 @@ describe("buildServer scrape integration", () => {
     expect(serverPixels).toEqual(expectedPixels);
   });
 
+  it("aggregates and downloads once for same-number variants sharing one task", async () => {
+    const root = await createTempRoot("scrape-runtime-aggregation");
+    await writeFile(join(root, "ABC-111.mp4"), "video");
+    await writeFile(join(root, "ABC-111-C.mp4"), "video");
+    const imageBytes = createTestPngBytes();
+    const imageDownloads: string[] = [];
+    const imageServer = await startLocalHttpServer((request, response) => {
+      // Ranged GETs are the dimension probes the downloader runs per candidate; only full GETs are downloads.
+      if (request.method === "GET" && !request.headers.range) {
+        imageDownloads.push(request.url ?? "");
+      }
+      response.writeHead(200, { "content-type": "image/png", "content-length": String(imageBytes.byteLength) });
+      response.end(request.method === "HEAD" ? undefined : imageBytes);
+    });
+    const inner = createTestAggregation(`${imageServer.url}/image.png`);
+    const aggregatedNumbers: string[] = [];
+    const { fastify } = await createTestServer({
+      scrapeAggregation: {
+        async aggregate(number, configuration, signal, manualScrape): Promise<AggregationResult | null> {
+          aggregatedNumbers.push(number);
+          return await inner.aggregate(number, configuration, signal, manualScrape);
+        },
+      },
+    });
+    const token = await loginAsAdmin(fastify);
+    const rootId = await syncMediaRootFromConfig(fastify, token, root);
+    await fastify.inject({
+      method: "POST",
+      url: "/trpc/config.update",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        // SubtitleCat is off here so the assertions stay offline; its per-task cache is covered by unit tests.
+        download: { downloadSceneImages: false, downloadTrailer: false, subtitleCat: false },
+      },
+    });
+
+    const startResponse = await fastify.inject({
+      method: "POST",
+      url: "/trpc/scrape.start",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        refs: [
+          { rootId, relativePath: "ABC-111.mp4" },
+          { rootId, relativePath: "ABC-111-C.mp4" },
+        ],
+      },
+    });
+    await waitForTaskStatus(fastify, token, startResponse.json().result.data.id, "completed");
+
+    // `-C` normalizes to the same base code, so the task aggregates and fetches the shared artwork once.
+    expect(aggregatedNumbers).toEqual(["ABC-111"]);
+    expect(imageDownloads).toEqual(["/image.png"]);
+    // Each variant still owns its output copies, which is what lets their poster badges differ.
+    for (const movieDir of ["ABC-111", "ABC-111-C"]) {
+      for (const asset of ["poster.png", "thumb.png", "fanart.png"]) {
+        await expect(readFile(join(root, "JAV_output/Actor A", movieDir, asset))).resolves.toBeDefined();
+      }
+    }
+  });
+
   it("keeps source media untouched while serving separated STRM metadata from the selected output root", async () => {
     const mediaRoot = await createTempRoot("separate-metadata-media");
     const metadataRoot = await createTempRoot("separate-metadata-local");
@@ -464,9 +525,10 @@ describe("buildServer scrape integration", () => {
     });
     const result = resultsResponse.json().result.data.results[0];
     const outputRelativePath = "ABC-123.mp4";
-    const nfoRelativePath = "Actor A/ABC-123-C/ABC-123-C.nfo";
-    const strmRelativePath = "Actor A/ABC-123-C/ABC-123-C.strm";
-    const posterRelativePath = "Actor A/ABC-123-C/poster.png";
+    // A local sidecar never earns a `-C`: the marker is reserved for sources that natively carry it.
+    const nfoRelativePath = "Actor A/ABC-123/ABC-123.nfo";
+    const strmRelativePath = "Actor A/ABC-123/ABC-123.strm";
+    const posterRelativePath = "Actor A/ABC-123/poster.png";
 
     expect(result).toMatchObject({
       rootId,
@@ -488,7 +550,10 @@ describe("buildServer scrape integration", () => {
     await expect(readFile(join(metadataRoot, strmRelativePath), "utf8")).resolves.toBe(
       join(mediaRoot, outputRelativePath),
     );
-    await expect(readFile(join(metadataRoot, "Actor A/ABC-123-C/ABC-123-C.zh.srt"), "utf8")).resolves.toBe("subtitle");
+    // The copy lands under the EMBY layout, tagged `src` so a SubtitleCat track could sit beside it.
+    await expect(readFile(join(metadataRoot, "Actor A/ABC-123/ABC-123.zh-CN.src.srt"), "utf8")).resolves.toBe(
+      "subtitle",
+    );
     const posterContent = await readFile(join(metadataRoot, posterRelativePath));
     expect([...posterContent.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -604,7 +669,7 @@ describe("buildServer scrape integration", () => {
 
   it("confirms moved uncensored outputs in place without scraping the old source again", async () => {
     const root = await createTempRoot("ambiguous-uncensored-root");
-    await writeFile(join(root, "ABP-999-U.mp4"), "video");
+    await writeFile(join(root, "ABP-999-无码.mp4"), "video");
     const imageServer = await startTestImageServer();
     let aggregateCount = 0;
     const aggregation = createAmbiguousUncensoredAggregation(`${imageServer.url}/image.png`);
@@ -629,7 +694,7 @@ describe("buildServer scrape integration", () => {
       method: "POST",
       url: "/trpc/scrape.start",
       headers: { authorization: `Bearer ${token}` },
-      payload: { refs: [{ rootId, relativePath: "ABP-999-U.mp4" }] },
+      payload: { refs: [{ rootId, relativePath: "ABP-999-无码.mp4" }] },
     });
     const taskId = startResponse.json().result.data.id;
 
@@ -638,8 +703,8 @@ describe("buildServer scrape integration", () => {
       .getState()
       .then((state) => state.repositories.library.listScrapeResults(taskId));
     const initialResult = initialResults[0];
-    expect(initialResult?.outputRelativePath).not.toBe("ABP-999-U.mp4");
-    await expect(readFile(join(root, "ABP-999-U.mp4"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(initialResult?.outputRelativePath).not.toBe("ABP-999-无码.mp4");
+    await expect(readFile(join(root, "ABP-999-无码.mp4"))).rejects.toMatchObject({ code: "ENOENT" });
 
     const firstCompletedEvent = completedEvents.at(-1) as {
       ambiguousUncensoredItems?: Array<{
@@ -650,7 +715,7 @@ describe("buildServer scrape integration", () => {
     };
     expect(firstCompletedEvent.ambiguousUncensoredItems).toEqual([
       expect.objectContaining({
-        ref: { rootId, relativePath: "ABP-999-U.mp4" },
+        ref: { rootId, relativePath: "ABP-999-无码.mp4" },
         number: "ABP-999",
         nfoRelativePath: initialResult?.nfoRelativePath,
       }),
@@ -662,7 +727,7 @@ describe("buildServer scrape integration", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: {
         taskId,
-        items: [{ ref: { rootId, relativePath: "ABP-999-U.mp4" }, choice: "leak" }],
+        items: [{ ref: { rootId, relativePath: "ABP-999-无码.mp4" }, choice: "leak" }],
       },
     });
 
@@ -690,7 +755,7 @@ describe("buildServer scrape integration", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: {
         taskId,
-        items: [{ ref: { rootId, relativePath: "ABP-999-U.mp4" }, choice: "leak" }],
+        items: [{ ref: { rootId, relativePath: "ABP-999-无码.mp4" }, choice: "leak" }],
       },
     });
     expect(repeatedResponse.statusCode).toBe(200);

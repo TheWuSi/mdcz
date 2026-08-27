@@ -190,7 +190,7 @@ const resolveCustomBadgeImagePath = async (
   badge: PosterBadgeDefinition,
   watermarkDirectory: string,
 ): Promise<string | null> => {
-  const basenames = POSTER_TAG_BADGE_IMAGE_FILENAMES[badge.id] ?? [badge.id, badge.label];
+  const basenames = badge.imageBasenames ?? POSTER_TAG_BADGE_IMAGE_FILENAMES[badge.id] ?? [badge.id, badge.label];
 
   for (const basename of basenames) {
     for (const extension of POSTER_TAG_BADGE_IMAGE_EXTENSIONS) {

@@ -18,10 +18,13 @@ import type {
 import { ImageDownloadService } from "./ImageDownloadService";
 import { type ImageHostCooldownStore, ImageHostCooldownTracker } from "./ImageHostCooldownTracker";
 import { SceneImageDownloader } from "./SceneImageDownloader";
+import type { ScrapeAssetCache } from "./ScrapeAssetCache";
 
 export type { DownloadCallbacks } from "./assets/types";
 
 export interface DownloadManagerOptions {
+  /** Shared across one scrape session so base-code variants download each image URL only once. */
+  assetCache?: ScrapeAssetCache;
   imageHostCooldownStore: ImageHostCooldownStore;
   logger?: Pick<RuntimeLogger, "info" | "warn">;
 }
@@ -43,7 +46,12 @@ export class DownloadManager {
     this.logger = options.logger ?? runtimeLoggerService.getLogger("DownloadManager");
     const hostCooldownTracker = new ImageHostCooldownTracker(options.imageHostCooldownStore, this.logger);
 
-    this.imageDownloader = new ImageDownloadService(networkClient, hostCooldownTracker, this.logger);
+    this.imageDownloader = new ImageDownloadService(
+      networkClient,
+      hostCooldownTracker,
+      this.logger,
+      options.assetCache,
+    );
     this.sceneImageDownloader = new SceneImageDownloader(this.imageDownloader, hostCooldownTracker, this.logger);
     this.downloaders = [
       new PrimaryImageAssetDownloader(),

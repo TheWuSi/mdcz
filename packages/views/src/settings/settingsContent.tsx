@@ -197,6 +197,9 @@ const ASSET_DOWNLOAD_FIELD_KEYS = [
   "download.downloadFanart",
   "download.downloadSceneImages",
   "download.downloadTrailer",
+  "download.subtitleCat",
+  "download.subtitleCatFallbackTraditional",
+  "download.embySubtitleNaming",
   "download.keepThumb",
   "download.keepPoster",
   "download.keepFanart",
@@ -398,14 +401,24 @@ export function AssetDownloadsSection() {
   const hasRenderableFields = useHasRenderableFields(ASSET_DOWNLOAD_FIELD_KEYS);
   const search = useOptionalSettingsSearch();
   const form = useFormContext<FieldValues>();
-  const [downloadThumb, downloadPoster, tagBadges, downloadFanart, downloadSceneImages, downloadTrailer] = form.watch([
+  const [
+    downloadThumb,
+    downloadPoster,
+    tagBadges,
+    downloadFanart,
+    downloadSceneImages,
+    downloadTrailer,
+    subtitleCat,
+  ] = form.watch([
     "download.downloadThumb",
     "download.downloadPoster",
     "download.tagBadges",
     "download.downloadFanart",
     "download.downloadSceneImages",
     "download.downloadTrailer",
+    "download.subtitleCat",
   ]) as [
+    boolean | undefined,
     boolean | undefined,
     boolean | undefined,
     boolean | undefined,
@@ -460,6 +473,23 @@ export function AssetDownloadsSection() {
       <BoolField name="download.downloadFanart" label="下载背景图" />
       <BoolField name="download.downloadSceneImages" label="下载剧照" />
       <BoolField name="download.downloadTrailer" label="下载预告片" />
+      <BoolField
+        name="download.subtitleCat"
+        label="在线抓取中文字幕"
+        description="源文件名不含 -C 时从 SubtitleCat 检索下载中文字幕；原生带 -C 的影片视为已内嵌硬字幕，直接跳过。下载的字幕不会改变产物命名。"
+      />
+      {shouldMountConditionalSettings(Boolean(subtitleCat), search) && (
+        <BoolField
+          name="download.subtitleCatFallbackTraditional"
+          label="回退繁体字幕"
+          description="找不到简体 (zh-CN) 字幕时，接受繁体 (zh-TW) 字幕，并按实际语言命名。"
+        />
+      )}
+      <BoolField
+        name="download.embySubtitleNaming"
+        label="EMBY 字幕命名"
+        description="本地外挂中文字幕重命名为 [影片名].zh-CN.src.srt，抓取字幕保存为 [影片名].zh-CN.subcat.srt；无法识别语言的字幕保持原名。"
+      />
       {shouldMountConditionalSettings(Boolean(downloadThumb), search) && (
         <BoolField name="download.keepThumb" label="保留已有横版缩略图" />
       )}

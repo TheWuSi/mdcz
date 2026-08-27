@@ -8,3 +8,4 @@ export * from "./DownloadManager";
 export * from "./ImageDownloadService";
 export * from "./ImageHostCooldownTracker";
 export * from "./SceneImageDownloader";
+export * from "./ScrapeAssetCache";

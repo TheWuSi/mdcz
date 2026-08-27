@@ -5,6 +5,7 @@ import type { RuntimeActorImageService, RuntimeActorSourceProvider } from "../ac
 import type { AggregationResult, ManualScrapeOptions } from "../aggregation";
 import type { FileOrganizer } from "../FileOrganizer";
 import type { NfoGenerator } from "../nfo";
+import type { DownloadedSubtitle } from "../subtitles/types";
 import type { ScrapeContext } from "./ScrapeContext";
 
 export interface ScrapeStage {
@@ -51,6 +52,8 @@ export interface FileScraperStageRuntime {
     context: ScrapeContext,
     signal?: AbortSignal,
   ): Promise<{ data: CrawlerData; actorPhotoPaths: string[] }>;
+  /** Omitted when the host has no network client to lend, which disables `SubtitleStage` entirely. */
+  fetchSubtitleCatSubtitle?(context: ScrapeContext, signal?: AbortSignal): Promise<DownloadedSubtitle | undefined>;
   downloadCrawlerAssets(
     context: ScrapeContext,
     signal?: AbortSignal,

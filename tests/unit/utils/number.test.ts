@@ -202,14 +202,14 @@ describe("parseFileInfo", () => {
     expect(parseFileInfo("/tmp/ABC-123-UC.mp4")).toMatchObject({
       number: "ABC-123",
       isUncensored: true,
-      filenameUncensoredChoice: "uncensored",
+      filenameUncensoredChoice: "umr",
       isSubtitled: true,
       subtitleTag: "中文字幕",
     });
   });
 
   it("classifies explicit cracked filename tokens without broad text matching", () => {
-    for (const input of ["/tmp/ABC-123-C-U.mp4", "/tmp/ABC-123-UMR.mp4", "/tmp/ABC-123-破解.mp4"]) {
+    for (const input of ["/tmp/ABC-123-UMR.mp4", "/tmp/ABC-123-破解.mp4", "/tmp/ABC-123-U.mp4"]) {
       expect(parseFileInfo(input)).toMatchObject({
         number: "ABC-123",
         isUncensored: true,
@@ -220,12 +220,37 @@ describe("parseFileInfo", () => {
       });
     }
 
+    // `-C-U` is the shape this app used to write for UMR plus burned-in subtitles, so both halves
+    // have to survive a re-scrape; naming then normalizes it back to `-UC`.
+    expect(parseFileInfo("/tmp/ABC-123-C-U.mp4")).toMatchObject({
+      number: "ABC-123",
+      isUncensored: true,
+      filenameUncensoredChoice: "umr",
+      isSubtitled: true,
+      subtitleTag: "中文字幕",
+      part: undefined,
+    });
+
     expect(parseFileInfo("/tmp/ABC-123-破解版本.mp4")).toMatchObject({
       filenameUncensoredChoice: undefined,
     });
+  });
 
-    expect(parseFileInfo("/tmp/ABC-123-U.mp4")).toMatchObject({
-      filenameUncensoredChoice: "uncensored",
+  it("reads spelled-out uncensored tokens as the unspecified kind", () => {
+    // `U` is UMR, so an uncensored release of unknown kind needs its own token — that is what leaves
+    // the file ambiguous and asks the user to pick.
+    for (const input of ["/tmp/ABC-123-无码.mp4", "/tmp/ABC-123-UNCENSORED.mp4"]) {
+      expect(parseFileInfo(input)).toMatchObject({
+        number: "ABC-123",
+        isUncensored: true,
+        filenameUncensoredChoice: "uncensored",
+        isSubtitled: false,
+      });
+    }
+
+    // An explicit kind still wins over the generic token.
+    expect(parseFileInfo("/tmp/ABC-123-无码-破解.mp4")).toMatchObject({
+      filenameUncensoredChoice: "umr",
     });
   });
 
@@ -263,6 +288,25 @@ describe("parseFileInfo", () => {
         number: "ABC-123",
         isSubtitled: false,
         subtitleTag: undefined,
+      });
+    }
+  });
+
+  it("collapses subtitle variants onto one base code and records marker provenance", () => {
+    // All three variants share a base code so same-number aggregation can dedupe them.
+    for (const input of ["/tmp/ABC-111.mp4", "/tmp/ABC-111-C.mp4", "/tmp/ABC-111-UC.mp4"]) {
+      expect(parseFileInfo(input).number).toBe("ABC-111");
+    }
+
+    expect(parseFileInfo("/tmp/ABC-111.mp4")).toMatchObject({
+      nativeSubtitled: false,
+      subtitleOrigin: undefined,
+    });
+
+    for (const input of ["/tmp/ABC-111-C.mp4", "/tmp/ABC-111-UC.mp4", "/tmp/ABC-111-CHS.mp4"]) {
+      expect(parseFileInfo(input)).toMatchObject({
+        nativeSubtitled: true,
+        subtitleOrigin: "embedded",
       });
     }
   });

@@ -587,6 +587,10 @@ export class ScrapeService {
     applyScrapeNetworkPolicy(this.networkClient, config);
     const policy = createScrapeExecutionPolicy(config, { logger: console });
     let progressHighWater = allResults.length > 0 ? Math.round((settledCount / allResults.length) * 100) : 0;
+    // Resolved before the executor exists so no await lands between `#executors.set()` and
+    // `execute()`: a `close()` arriving in that window would be dropped by `TaskExecutor.stop()`,
+    // which no-ops until a run is active.
+    const sessionFilePaths = await this.resolveSessionFilePaths(results);
     const executor = new TaskExecutor<ScrapeResultRecord, void>({
       concurrency: policy.concurrency,
       runItem: async (result, context) => {
@@ -661,12 +665,21 @@ export class ScrapeService {
     this.#executors.set(taskId, executor);
 
     const current = await state.repositories.tasks.get(taskId);
-    if (current.status !== "running" || current.executionVersion !== executionVersion) {
+    // `close()` only reaches executors that are already registered, so a shutdown landing during the
+    // awaits above would otherwise let the whole batch run to completion while it waits for idle.
+    if (
+      this.scheduler.isStopRequested ||
+      current.status !== "running" ||
+      current.executionVersion !== executionVersion
+    ) {
       this.#executors.delete(taskId);
       return;
     }
     await this.addEvent(taskId, "running", "Scrape task started");
     this.taskEvents.publish({ kind: "task", task: await this.toDto(taskId) });
+    // Registers the whole submitted batch, so the runtime's same-number grouping follows the task
+    // list rather than whichever files the executor happens to run side by side.
+    this.runtime.beginSession(taskId, sessionFilePaths, config.scrape.filenameIgnoreTokens);
 
     try {
       const summary = await executor.execute(results, executionVersion);
@@ -726,7 +739,28 @@ export class ScrapeService {
       if (this.#executors.get(taskId) === executor) this.#executors.delete(taskId);
       this.#uncensoredConfirmedTasks.delete(taskId);
       this.#uncensoredChoices.delete(taskId);
+      // Frees the task's metadata / artwork / subtitle caches on every exit path, including stop and pause.
+      await this.runtime.releaseSession(taskId);
     }
+  }
+
+  /** Resolves each pending item to its absolute path so the runtime can group them by base code. */
+  private async resolveSessionFilePaths(results: readonly ScrapeResultRecord[]): Promise<string[]> {
+    const roots = new Map<string, MediaRoot>();
+    const filePaths: string[] = [];
+    for (const result of results) {
+      try {
+        let root = roots.get(result.rootId);
+        if (!root) {
+          root = await this.mediaRoots.getActiveRoot(result.rootId);
+          roots.set(result.rootId, root);
+        }
+        filePaths.push(resolveRootRelativePath(root, result.relativePath));
+      } catch {
+        // An unreachable root fails loudly per item inside `runItem`; grouping just skips it.
+      }
+    }
+    return filePaths;
   }
 
   private async upsertPendingResult(

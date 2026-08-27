@@ -1,4 +1,11 @@
-import { POSTER_TAG_BADGE_TYPE_OPTIONS, type PosterTagBadgeType } from "@mdcz/shared/posterBadges";
+import {
+  POSTER_TAG_BADGE_IMAGE_FILENAMES,
+  POSTER_TAG_BADGE_SUBTITLE_VARIANT_IMAGE_FILENAMES,
+  POSTER_TAG_BADGE_SUBTITLE_VARIANT_LABELS,
+  POSTER_TAG_BADGE_TYPE_OPTIONS,
+  type PosterTagBadgeSubtitleVariant,
+  type PosterTagBadgeType,
+} from "@mdcz/shared/posterBadges";
 import type { CrawlerData, FileInfo, NfoLocalState } from "@mdcz/shared/types";
 import { buildMovieTags, normalizeNfoLocalState } from "../maintenance/movieTags";
 import { classifyMovie, type MovieClassification } from "./utils/movieClassification";
@@ -9,6 +16,8 @@ export interface PosterBadgeDefinition {
   colorStart: string;
   colorEnd: string;
   accentColor: string;
+  /** Overrides the default custom-image lookup names; falls through to them when omitted. */
+  imageBasenames?: readonly string[];
 }
 
 interface PosterBadgeMatchContext {
@@ -99,6 +108,33 @@ const POSTER_BADGE_DEFINITIONS: Array<
   },
 ];
 
+/**
+ * A `-C` labelled source carries burned-in subtitles; anything else that ends up tagged as subtitled
+ * got there from a sidecar or a SubtitleCat download, i.e. an external track.
+ */
+const resolveSubtitleVariant = (fileInfo: FileInfo | undefined): PosterTagBadgeSubtitleVariant =>
+  fileInfo?.subtitleOrigin ?? (fileInfo?.nativeSubtitled ? "embedded" : "external");
+
+/** Distinguishes 内嵌中字 from 外挂中字 without adding a badge type users would have to opt into. */
+const applySubtitleVariant = (
+  definition: PosterBadgeDefinition,
+  fileInfo: FileInfo | undefined,
+): PosterBadgeDefinition => {
+  if (definition.id !== "subtitle") {
+    return definition;
+  }
+
+  const variant = resolveSubtitleVariant(fileInfo);
+  return {
+    ...definition,
+    label: POSTER_TAG_BADGE_SUBTITLE_VARIANT_LABELS[variant],
+    imageBasenames: [
+      ...POSTER_TAG_BADGE_SUBTITLE_VARIANT_IMAGE_FILENAMES[variant],
+      ...POSTER_TAG_BADGE_IMAGE_FILENAMES.subtitle,
+    ],
+  };
+};
+
 export const resolvePosterBadgeDefinitions = (
   data: CrawlerData,
   fileInfo: FileInfo | undefined,
@@ -112,5 +148,5 @@ export const resolvePosterBadgeDefinitions = (
 
   return POSTER_BADGE_DEFINITIONS.filter(
     (definition) => enabledTypeSet.has(definition.id) && definition.matches({ tags, fileInfo, classification }),
-  ).map(({ matches: _matches, ...definition }) => definition);
+  ).map(({ matches: _matches, ...definition }) => applySubtitleVariant(definition, fileInfo));
 };

@@ -21,8 +21,10 @@ import {
   applyScrapeNetworkPolicy,
   createScrapeExecutionPolicy,
   type ScrapeRestGate,
+  ScrapeSessionScope,
   TranslateService,
 } from "@mdcz/runtime/scrape";
+import { parseFileInfo } from "@mdcz/runtime/scrape/utils/number";
 import { ScrapeSession, type ScrapeSessionExecutionStore, type ScrapeSuccessItem } from "@mdcz/runtime/tasks";
 import type { ScraperStatus } from "@mdcz/shared/types";
 import { DesktopScrapeExecutionStore } from "./DesktopScrapeExecutionStore";
@@ -71,6 +73,12 @@ export class ScraperService {
 
   private finishingRun: { scrapeSessionId: string; promise: Promise<void> } | null = null;
   private currentRunPromise: Promise<void> | null = null;
+
+  /** Live scopes for the running session. */
+  private readonly sessionScopes = new Set<ScrapeSessionScope>();
+
+  /** The scope of the session currently running, so a retry rejoins it instead of starting its own. */
+  private sessionScope: ScrapeSessionScope | null = null;
 
   private pauseRequested = false;
 
@@ -200,6 +208,7 @@ export class ScraperService {
       }
     }
 
+    await this.disposeSessionScopes();
     await this.imageHostCooldownStore.flush();
   }
 
@@ -233,7 +242,14 @@ export class ScraperService {
     // Supports both single-item and batch manual retry from frontend.
     const pending = uniquePaths(filePaths);
     const totalFiles = Math.max(1, this.session.getStatus().totalFiles);
-    const fileScraper = createFileScraper(this.createFileScraperDependencies(), {
+    const configuration = await configManager.getValidated();
+    // A retry rejoins the running session's scope. It must not get one of its own: a second scope
+    // means a second `NumberExecutionGate`, and a retried `ABC-111-C` could then run alongside the
+    // `ABC-111-UC` still in flight and race it for the same output directory. The metadata and
+    // subtitle caches are cleared for the retried numbers instead, which is what
+    // `clearImageHostCooldownsForRetry()` already does for image hosts.
+    const sessionScope = this.sessionScope ?? this.createSessionScope(pending, configuration);
+    const fileScraper = createFileScraper(this.createFileScraperDependencies(sessionScope), {
       mode: "batch",
       scrapeSessionId: this.session.getTaskId() ?? undefined,
     });
@@ -248,6 +264,8 @@ export class ScraperService {
       }
 
       const fileIndex = cursor;
+      sessionScope.groups.add(filePath, configuration.scrape.filenameIgnoreTokens);
+      sessionScope.invalidateBaseCode(parseFileInfo(filePath, configuration.scrape.filenameIgnoreTokens).number);
 
       if (
         !(await this.session.addTask({
@@ -255,12 +273,17 @@ export class ScraperService {
           isRetry: true,
           taskFn: async (signal) => {
             await this.restGate?.waitBeforeStart(signal);
-            return manualScrape
-              ? fileScraper.scrapeFile(filePath, { fileIndex, totalFiles }, signal, { manualScrape })
-              : fileScraper.scrapeFile(filePath, { fileIndex, totalFiles }, signal);
+            try {
+              return manualScrape
+                ? await fileScraper.scrapeFile(filePath, { fileIndex, totalFiles }, signal, { manualScrape })
+                : await fileScraper.scrapeFile(filePath, { fileIndex, totalFiles }, signal);
+            } finally {
+              sessionScope.groups.complete(filePath);
+            }
           },
         }))
       ) {
+        sessionScope.groups.complete(filePath);
         continue;
       }
 
@@ -330,6 +353,7 @@ export class ScraperService {
     this.outputLibraryScanner.invalidate();
 
     this.aggregationService.clearCache();
+    await this.disposeSessionScopes();
 
     this.signalService.setButtonStatus(true, false);
     this.logger.info(`Scrape session finished: ${scrapeSessionId}`);
@@ -352,7 +376,7 @@ export class ScraperService {
     return await this.beginSession(filePaths, configuration, "batch", manualScrape);
   }
 
-  private createFileScraperDependencies() {
+  private createFileScraperDependencies(sessionScope: ScrapeSessionScope) {
     return {
       aggregationService: this.aggregationService,
       translateService: new TranslateService(this.sharedNetworkClient, {
@@ -361,13 +385,47 @@ export class ScraperService {
       }),
       nfoGenerator: new NfoGenerator(),
       downloadManager: new DownloadManager(this.sharedNetworkClient, {
+        assetCache: sessionScope.assetCache,
         imageHostCooldownStore: this.imageHostCooldownStore,
       }),
       fileOrganizer,
+      networkClient: this.sharedNetworkClient,
       signalService: this.signalService,
       actorImageService: this.actorImageService,
       actorSourceProvider: this.actorSourceProvider,
+      sessionScope,
     };
+  }
+
+  /**
+   * Scopes are per batch, never per process: `AggregationCoordinator` caches successes for its whole
+   * lifetime, so a longer-lived scope would serve stale metadata to a later re-scrape.
+   *
+   * A batch gets exactly one scope, seeded with the whole submitted file list, so same-number variants
+   * share one `NumberExecutionGate` and one set of caches no matter how the worker pool interleaves
+   * them. Retries join that same scope through `sessionScope` rather than creating a second one.
+   */
+  private createSessionScope(filePaths: readonly string[], configuration: Configuration): ScrapeSessionScope {
+    const scope = new ScrapeSessionScope(this.aggregationService);
+    scope.groups.seed(filePaths, configuration.scrape.filenameIgnoreTokens);
+    this.sessionScopes.add(scope);
+    this.sessionScope = scope;
+    return scope;
+  }
+
+  private async disposeSessionScopes(): Promise<void> {
+    const scopes = [...this.sessionScopes];
+    this.sessionScopes.clear();
+    this.sessionScope = null;
+    await Promise.all(
+      scopes.map(async (scope) => {
+        try {
+          await scope.dispose();
+        } catch (error) {
+          this.logger.warn(`Failed to dispose scrape session scope: ${toErrorMessage(error)}`);
+        }
+      }),
+    );
   }
 
   private async recordLibraryEntries(items: ScrapeSuccessItem[], scrapeSessionId: string): Promise<void> {
@@ -479,7 +537,8 @@ export class ScraperService {
     this.signalService.setButtonStatus(false, true);
     this.signalService.resetProgress();
 
-    const fileScraper = createFileScraper(this.createFileScraperDependencies(), {
+    const sessionScope = this.createSessionScope(filePaths, configuration);
+    const fileScraper = createFileScraper(this.createFileScraperDependencies(sessionScope), {
       mode,
       scrapeSessionId,
     });
@@ -492,9 +551,13 @@ export class ScraperService {
         taskFn: async (signal) => {
           await this.restGate?.waitBeforeStart(signal);
           const progress = { fileIndex, totalFiles: filePaths.length };
-          return manualScrape
-            ? fileScraper.scrapeFile(filePath, progress, signal, { manualScrape })
-            : fileScraper.scrapeFile(filePath, progress, signal);
+          try {
+            return manualScrape
+              ? await fileScraper.scrapeFile(filePath, progress, signal, { manualScrape })
+              : await fileScraper.scrapeFile(filePath, progress, signal);
+          } finally {
+            sessionScope.groups.complete(filePath);
+          }
         },
       });
     }

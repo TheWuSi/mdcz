@@ -20,6 +20,8 @@ export interface TaskExecutorGate<TItem> {
 export class TaskExecutor<TItem, TResult> {
   private pauseRequested = false;
   private stopRequested = false;
+  /** A `stop()` that arrived before the run started, carried into the next `execute()`. */
+  private stopRequestedBeforeRun = false;
   private activeCount = 0;
   private activeRun: Promise<TaskExecutorSummary> | null = null;
   private controller: AbortController | null = null;
@@ -41,8 +43,12 @@ export class TaskExecutor<TItem, TResult> {
     if (this.activeRun) throw new Error("TaskExecutor is already active");
 
     this.pauseRequested = false;
-    this.stopRequested = false;
+    this.stopRequested = this.stopRequestedBeforeRun;
+    this.stopRequestedBeforeRun = false;
     this.controller = new AbortController();
+    if (this.stopRequested) {
+      this.controller.abort();
+    }
     const run = this.run(items, executionVersion);
     this.activeRun = run;
     const clear = () => {
@@ -63,8 +69,17 @@ export class TaskExecutor<TItem, TResult> {
     if (this.activeRun && !this.stopRequested) this.pauseRequested = false;
   }
 
+  /**
+   * A stop that lands between the executor being registered and `execute()` being called must not be
+   * dropped, or the caller's shutdown lets the whole batch run to completion. It is latched instead
+   * and consumed by the next run, which then settles as `stopped` without starting an item.
+   */
   stop(): void {
-    if (!this.activeRun || this.stopRequested) return;
+    if (!this.activeRun) {
+      this.stopRequestedBeforeRun = true;
+      return;
+    }
+    if (this.stopRequested) return;
     this.stopRequested = true;
     this.controller?.abort();
   }

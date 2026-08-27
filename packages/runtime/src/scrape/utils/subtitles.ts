@@ -99,3 +99,12 @@ export const resolveFileInfoSubtitleTag = (
 
   return fileInfo.isSubtitled ? "字幕" : undefined;
 };
+
+/**
+ * Only a Chinese-subtitle marker that came from the source filename may influence
+ * output naming. Sidecar subtitles and SubtitleCat downloads must never cause a
+ * `-C` suffix to appear on a number that did not originally carry one.
+ */
+export const hasNativeChineseSubtitleTag = (
+  fileInfo: Pick<FileInfo, "isSubtitled" | "subtitleTag" | "nativeSubtitled"> | undefined,
+): boolean => fileInfo?.nativeSubtitled === true && resolveFileInfoSubtitleTag(fileInfo) === "中文字幕";

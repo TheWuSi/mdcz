@@ -1,4 +1,5 @@
 import type { ScrapeResult } from "@mdcz/shared/types";
+import { writeDownloadedSubtitleIfNeeded } from "../output/writeDownloadedSubtitle";
 import { throwIfAborted } from "../utils/abort";
 import { classifyMovie, isLikelyUncensoredNumber } from "../utils/movieClassification";
 import type { ScrapeContext } from "./ScrapeContext";
@@ -21,6 +22,14 @@ export class OrganizeStage implements ScrapeStage {
 
     throwIfAborted(signal);
     context.outputVideoPath = await this.runtime.organizePreparedVideo(context, signal);
+
+    await writeDownloadedSubtitleIfNeeded({
+      logger: this.runtime.logger,
+      numberLabel: context.fileInfo.number,
+      outputVideoPath: context.outputVideoPath,
+      signalService: this.runtime.signalService,
+      subtitle: context.downloadedSubtitle,
+    });
 
     this.runtime.setProgress(context.progress, 100);
 

@@ -37,6 +37,28 @@ export class AggregationCoordinator {
     return request;
   }
 
+  /**
+   * Forgets every cached result for one base code, including the manual-scrape variants, so a retry
+   * re-aggregates instead of replaying the metadata that may have caused the failure.
+   */
+  invalidate(number: string): void {
+    const prefix = number.trim().toUpperCase();
+    if (!prefix) {
+      return;
+    }
+
+    for (const cacheKey of [...this.aggregationPromiseCache.keys()]) {
+      if (cacheKey === prefix || cacheKey.startsWith(`${prefix}::manual::`)) {
+        this.aggregationPromiseCache.delete(cacheKey);
+        const timer = this.aggregationFailureEvictionTimers.get(cacheKey);
+        if (timer) {
+          clearTimeout(timer);
+          this.aggregationFailureEvictionTimers.delete(cacheKey);
+        }
+      }
+    }
+  }
+
   private scheduleFailedAggregationEviction(cacheKey: string, request: Promise<AggregationResult | null>): void {
     const existingTimer = this.aggregationFailureEvictionTimers.get(cacheKey);
     if (existingTimer) {

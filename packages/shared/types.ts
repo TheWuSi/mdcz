@@ -69,6 +69,14 @@ export interface FileInfo {
   number: string;
   isSubtitled: boolean;
   subtitleTag?: SubtitleTag;
+  /**
+   * True only when the Chinese-subtitle marker comes from the source filename itself
+   * (`-C`, `-CHS`, `-UC`, ...). Tags promoted from sidecar subtitles or online
+   * downloads leave this false so naming never appends a `-C` the source never had.
+   */
+  nativeSubtitled?: boolean;
+  /** Where the Chinese subtitle lives: burned into the video, or a sidecar file. */
+  subtitleOrigin?: SubtitleOrigin;
   isUncensored?: boolean;
   /** Classification marker parsed from the filename; user/NFO choices remain authoritative. */
   filenameUncensoredChoice?: UncensoredChoice;
@@ -81,6 +89,7 @@ export interface FileInfo {
 
 export type ScrapeResultStatus = "pending" | "processing" | "success" | "failed" | "skipped";
 export type SubtitleTag = "字幕" | "中文字幕";
+export type SubtitleOrigin = "embedded" | "external";
 
 /** Structured record of all files produced by DownloadManager. */
 export interface DownloadedAssets {

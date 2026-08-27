@@ -2,7 +2,8 @@ import type { ActorImageService } from "@main/services/ActorImageService";
 import type { SignalService } from "@main/services/SignalService";
 import type { ActorSourceProvider } from "@mdcz/runtime/actorSource";
 import type { LocalScanService } from "@mdcz/runtime/maintenance";
-import type { AggregationService, TranslateService } from "@mdcz/runtime/scrape";
+import type { NetworkClient } from "@mdcz/runtime/network";
+import type { AggregationService, ScrapeSessionScope, TranslateService } from "@mdcz/runtime/scrape";
 import {
   type FileScrapeOptions,
   type FileScrapeProgress,
@@ -25,6 +26,13 @@ export interface FileScraperDependencies {
   actorImageService?: ActorImageService;
   actorSourceProvider?: ActorSourceProvider;
   localScanService?: Pick<LocalScanService, "scanVideo">;
+  /** Lent to `SubtitleStage`; without it SubtitleCat lookups are skipped. */
+  networkClient?: NetworkClient;
+  /**
+   * Shares the per-number gate and the metadata / artwork / subtitle caches across one batch. Omitting
+   * it gives this scraper private, single-file-scoped instances.
+   */
+  sessionScope?: ScrapeSessionScope;
 }
 
 export interface CreateFileScraperOptions {

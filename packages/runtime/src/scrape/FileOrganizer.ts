@@ -21,6 +21,11 @@ export interface OrganizePlan {
   strmPath?: string;
   subtitleSidecars?: SubtitleSidecarMatch[];
   separated?: boolean;
+  /**
+   * Carried on the plan rather than re-read from config so the collision planner and the mover
+   * derive the exact same sidecar names. Absent on hand-built plans, which keep legacy naming.
+   */
+  embySubtitleNaming?: boolean;
 }
 
 export const resolveMetadataOutputDir = (plan: OrganizePlan): string => plan.metadataDir ?? plan.outputDir;
@@ -42,12 +47,13 @@ export class FileOrganizer {
 
   private readonly namingEngine = new NamingEngine();
 
-  private readonly pathPlanner = new PathPlanner(this.sidecarResolver);
+  private readonly pathPlanner: PathPlanner;
 
   private readonly fileMover: FileMover;
 
   constructor(logger: RuntimeLogger = noopRuntimeLogger) {
     this.logger = logger;
+    this.pathPlanner = new PathPlanner(this.sidecarResolver, this.logger);
     this.fileMover = new FileMover(this.logger, this.sidecarResolver);
   }
 
@@ -90,6 +96,7 @@ export class FileOrganizer {
       nfoPath,
       strmPath,
       separated,
+      embySubtitleNaming: config.download.embySubtitleNaming,
     };
   }
 
@@ -163,6 +170,7 @@ export class FileOrganizer {
       nfoPath: plan.nfoPath,
       ignoreExistingNfoAtTarget: sameDirectoryOutput,
       subtitleSidecars: plan.subtitleSidecars,
+      embySubtitleNaming: plan.embySubtitleNaming,
     });
 
     const metadataDir = plan.metadataDir ?? dirname(resolvedPlan.nfoPath ?? plan.nfoPath);
@@ -174,16 +182,19 @@ export class FileOrganizer {
       strmPath: plan.strmPath ? join(metadataDir, `${parse(resolvedPlan.targetVideoPath).name}.strm`) : undefined,
       subtitleSidecars: resolvedPlan.subtitleSidecars,
       separated: plan.separated,
+      embySubtitleNaming: plan.embySubtitleNaming,
     };
   }
 
   async organizeVideo(fileInfo: FileInfo, plan: OrganizePlan, config: Configuration): Promise<string> {
     let organizedPath: string;
+    const embySubtitleNaming = plan.embySubtitleNaming;
     if (config.behavior.fileMode === "separated") {
       await ensureParentDirectory(plan.targetVideoPath);
       organizedPath = await this.fileMover.createSeparatedStrmBundle(fileInfo.filePath, plan.targetVideoPath, {
         subtitleSidecars: plan.subtitleSidecars,
         sharedMovieBaseName: parse(plan.nfoPath).name,
+        embySubtitleNaming,
       });
     } else if (!config.behavior.successFileMove) {
       if (!config.behavior.successFileRename) {
@@ -193,6 +204,7 @@ export class FileOrganizer {
         organizedPath = await this.fileMover.moveBundledMedia(fileInfo.filePath, plan.targetVideoPath, {
           subtitleSidecars: plan.subtitleSidecars,
           sharedMovieBaseName: parse(plan.nfoPath).name,
+          embySubtitleNaming,
         });
       }
     } else {
@@ -200,6 +212,7 @@ export class FileOrganizer {
       organizedPath = await this.fileMover.moveBundledMedia(fileInfo.filePath, plan.targetVideoPath, {
         subtitleSidecars: plan.subtitleSidecars,
         sharedMovieBaseName: parse(plan.nfoPath).name,
+        embySubtitleNaming,
       });
 
       if (config.behavior.deleteEmptyFolder) {

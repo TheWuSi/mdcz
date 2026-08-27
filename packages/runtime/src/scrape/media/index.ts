@@ -1,4 +1,12 @@
 export {
+  buildEmbySubtitleTargetPath,
+  buildSubtitleSidecarEmbyTargetPaths,
+  EMBY_SUBTITLE_SOURCE_TAGS,
+  type EmbySubtitleLanguage,
+  type EmbySubtitleSourceTag,
+  resolveSidecarEmbyLanguage,
+} from "./embySubtitleNaming";
+export {
   type FileInfoWithSubtitles,
   type ResolveFileInfoWithSubtitlesOptions,
   resolveFileInfoWithSubtitles,

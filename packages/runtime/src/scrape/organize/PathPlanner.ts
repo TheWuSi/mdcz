@@ -1,11 +1,19 @@
 import { stat } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
-import { buildSubtitleSidecarTargetPath, type SubtitleSidecarMatch } from "../media";
+import { noopRuntimeLogger, type RuntimeLogger } from "../../shared";
+import {
+  buildSubtitleSidecarEmbyTargetPaths,
+  buildSubtitleSidecarTargetPath,
+  type SubtitleSidecarMatch,
+} from "../media";
 import { pathExists } from "../utils/filesystem";
 import type { SidecarResolver } from "./SidecarResolver";
 
 export class PathPlanner {
-  constructor(private readonly sidecarResolver: SidecarResolver) {}
+  constructor(
+    private readonly sidecarResolver: SidecarResolver,
+    private readonly logger: Pick<RuntimeLogger, "warn"> = noopRuntimeLogger,
+  ) {}
 
   async resolveBundledTargetPaths(options: {
     sourceVideoPath: string;
@@ -13,6 +21,7 @@ export class PathPlanner {
     nfoPath?: string;
     ignoreExistingNfoAtTarget?: boolean;
     subtitleSidecars?: SubtitleSidecarMatch[];
+    embySubtitleNaming?: boolean;
   }): Promise<{
     targetVideoPath: string;
     nfoPath?: string;
@@ -45,9 +54,13 @@ export class PathPlanner {
         : undefined;
       const candidatePaths = [
         candidateVideoPath,
-        ...subtitleSidecars.map((subtitleSidecar) =>
-          buildSubtitleSidecarTargetPath(subtitleSidecar, candidateVideoPath),
-        ),
+        // Must mirror FileMover exactly, or collision detection would clear a name the
+        // mover then refuses to use.
+        ...(options.embySubtitleNaming
+          ? buildSubtitleSidecarEmbyTargetPaths(subtitleSidecars, candidateVideoPath)
+          : subtitleSidecars.map((subtitleSidecar) =>
+              buildSubtitleSidecarTargetPath(subtitleSidecar, candidateVideoPath),
+            )),
         ...(candidateNfoPath && !sharedMultipartNfo ? [candidateNfoPath] : []),
       ];
       const hasCollision = (
@@ -55,6 +68,16 @@ export class PathPlanner {
       ).some(Boolean);
 
       if (!hasCollision) {
+        if (collisionSuffix > 0) {
+          // Two files wanted the same output name. That is legitimate for genuinely different movies,
+          // but it is also what a marker bug looks like — `ABC-111-UC` naming itself `ABC-111-C` used
+          // to land here silently. Say so, so the next one is visible.
+          this.logger.warn(
+            `Output name already taken, falling back to "${candidateBaseName}${parsedTargetVideo.ext}": ` +
+              `${options.sourceVideoPath} collides with ${join(parsedTargetVideo.dir, parsedTargetVideo.base)}`,
+          );
+        }
+
         return {
           targetVideoPath: candidateVideoPath,
           nfoPath: candidateNfoPath,
