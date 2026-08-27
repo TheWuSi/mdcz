@@ -143,6 +143,10 @@ const NAMING_TEMPLATE_PLACEHOLDERS = [
   ["{studio}", "片商"],
   ["{publisher}", "发行商"],
   ["{filename}", "原始视频文件名，不含扩展名"],
+  [
+    "{originPath}",
+    "源文件所在的分类库目录，即相对“媒体目录”的第一层文件夹；如媒体目录为 /media、源文件为 /media/movies/Inception/x.mkv 时输出 movies。源文件不在媒体目录下时输出空，该层会从路径中消失",
+  ],
   ["{definition} / {resolution}", "视频分辨率，如 1080P、2160P"],
   ["{4K}", "分辨率达到 4K 或 8K 时输出对应标识"],
   ["{cnword}", "检测到中文字幕时输出配置的字幕标识"],

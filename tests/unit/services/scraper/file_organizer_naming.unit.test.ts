@@ -1,4 +1,4 @@
-import { join, parse, resolve } from "node:path";
+import { join, parse, relative, resolve } from "node:path";
 import { buildGeneratedVideoSidecarTargetPath, FileOrganizer, isGeneratedSidecarVideo } from "@mdcz/runtime/scrape";
 import { parseFileInfo } from "@mdcz/runtime/scrape/utils/number";
 import { Website } from "@mdcz/shared/enums";
@@ -107,6 +107,55 @@ describe("FileOrganizer naming rules", () => {
     for (const { config, fileInfo, crawlerData, assert } of cases) {
       assert(organizer.plan(fileInfo, crawlerData, config));
     }
+  });
+
+  it("resolves {originPath} to the library folder the source came from", () => {
+    const organizer = new FileOrganizer();
+    const originConfig = createConfig({
+      naming: { folderTemplate: "{originPath}/{number}", fileTemplate: "{number}" },
+    });
+    const folderFor = (filePath: string, config = originConfig) =>
+      parse(organizer.plan(createFileInfo({ filePath }), createCrawlerData(), config).outputDir).base;
+    const relativeFolderFor = (filePath: string, config = originConfig) => {
+      const plan = organizer.plan(createFileInfo({ filePath }), createCrawlerData(), config);
+      return relative(join(resolve("/media"), "output"), plan.outputDir).split(/[\\/]/u);
+    };
+
+    // Only the first segment: it says which library the file belongs to, it does not replay the tree.
+    expect(relativeFolderFor("/media/movies/Inception (2010)/Inception (2010).mkv")).toEqual(["movies", "ABC-123-CEN"]);
+    expect(relativeFolderFor("/media/tv/Breaking Bad/Season 01/S01E01.mkv")).toEqual(["tv", "ABC-123-CEN"]);
+
+    // Directly in the media root, or outside it entirely: the segment drops out of the path.
+    expect(relativeFolderFor("/media/loose.mp4")).toEqual(["ABC-123-CEN"]);
+    expect(relativeFolderFor("/elsewhere/movies/loose.mp4")).toEqual(["ABC-123-CEN"]);
+    expect(
+      folderFor(
+        "/media/movies/x.mp4",
+        createConfig({
+          paths: { mediaPath: "" },
+          naming: { folderTemplate: "{originPath}/{number}", fileTemplate: "{number}" },
+        }),
+      ),
+    ).toBe("ABC-123-CEN");
+  });
+
+  it("keeps {originPath} pointing at the media root in separated mode", () => {
+    const organizer = new FileOrganizer();
+    const config = createConfig({
+      paths: { mediaPath: "/media", metadataPath: "/metadata" },
+      behavior: { fileMode: "separated" },
+      naming: { folderTemplate: "{originPath}/{number}", fileTemplate: "{number}" },
+    });
+
+    const plan = organizer.plan(
+      createFileInfo({ filePath: "/media/movies/Inception (2010)/Inception (2010).mkv" }),
+      createCrawlerData(),
+      config,
+    );
+
+    // The metadata mirror keeps the library split, which is the point of the placeholder.
+    expect(relative(resolve("/metadata"), plan.outputDir).split(/[\\/]/u)).toEqual(["movies", "ABC-123-CEN"]);
+    expect(parse(plan.targetVideoPath).ext).toBe(".strm");
   });
 
   it("merges short censorship and subtitle markers into one suffix", () => {
@@ -422,6 +471,13 @@ describe("FileOrganizer naming rules", () => {
     expect(subtitlePreview?.folder).toContain("ABC-456-SUB");
     expect(subtitlePreview?.folder).toContain("2024 示例导演 121 2160P ABC-456");
     expect(subtitlePreview?.file).toBe("ABC-456 演员B 2024-01-15 A 4K -SUB 有码 4.5 示例简介 示例发行 dmm.mp4");
+
+    // The preview re-homes its sample under the media directory so `{originPath}` shows a real folder
+    // rather than collapsing to nothing.
+    const originPreviews = organizer.buildNamingPreview(
+      createConfig({ naming: { folderTemplate: "{originPath}/{number}", fileTemplate: "{number}" } }),
+    );
+    expect(originPreviews.find((item) => item.label === "普通")?.folder).toBe(join("movies", "ABC-123-CEN"));
   });
 
   it("preserves input extension and explicit multipart suffix casing when renaming", () => {

@@ -1,4 +1,4 @@
-import { parse } from "node:path";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import type { Configuration } from "@mdcz/shared/config";
 import { Website } from "@mdcz/shared/enums";
 import type { CrawlerData, FileInfo, NamingPreviewItem, NfoLocalState } from "@mdcz/shared/types";
@@ -220,6 +220,29 @@ const getNumberFirstLetter = (number: string): string | undefined => {
   return /[0-9A-Z]/u.test(first) ? first : "#";
 };
 
+/**
+ * The top-level library folder the source file came from — `movies` for
+ * `<mediaPath>/movies/Inception (2010)/Inception (2010).mkv`.
+ *
+ * Only the first segment, never the whole relative directory: it answers "which library is this"
+ * so a template like `{originPath}/{number}` keeps movies, tv and anime apart under one output root,
+ * without replicating the source tree. Returns undefined when the media directory is unset or the
+ * file sits outside it, which drops the segment from the rendered path instead of failing the file.
+ */
+const resolveOriginPathSegment = (filePath: string, mediaPath: string): string | undefined => {
+  const configuredMediaRoot = mediaPath.trim();
+  if (!configuredMediaRoot || !isAbsolute(configuredMediaRoot) || !isAbsolute(filePath)) {
+    return undefined;
+  }
+
+  const relativeDir = relative(resolve(configuredMediaRoot), resolve(dirname(filePath)));
+  if (!relativeDir || relativeDir === ".." || relativeDir.startsWith(`..${sep}`) || isAbsolute(relativeDir)) {
+    return undefined;
+  }
+
+  return relativeDir.split(/[\\/]/u)[0] || undefined;
+};
+
 const formatDefinition = (fileInfo: FileInfo): string | undefined => {
   const resolution = fileInfo.resolution?.trim();
   return resolution || undefined;
@@ -364,6 +387,24 @@ const NAMING_PREVIEW_SAMPLES: Array<{
   },
 ];
 
+/**
+ * Re-homes the preview sample under the configured media directory so `{originPath}` renders a
+ * plausible library folder instead of nothing. The rest of the sample is already illustrative data.
+ */
+const PREVIEW_ORIGIN_FOLDER = "movies";
+
+const previewSampleFileInfo = (fileInfo: FileInfo, config: Configuration): FileInfo => {
+  const mediaRoot = config.paths.mediaPath.trim();
+  if (!mediaRoot || !isAbsolute(mediaRoot)) {
+    return fileInfo;
+  }
+
+  return {
+    ...fileInfo,
+    filePath: join(mediaRoot, PREVIEW_ORIGIN_FOLDER, `${fileInfo.fileName}${fileInfo.extension}`),
+  };
+};
+
 export class NamingEngine {
   buildLayout(fileInfo: FileInfo, data: CrawlerData, config: Configuration, localState?: NfoLocalState): NamingLayout {
     const title = data.title_zh?.trim() || data.title;
@@ -406,6 +447,7 @@ export class NamingEngine {
       letters: getNumberLetters(data.number),
       firstLetter: getNumberFirstLetter(data.number),
       filename: sourceFileName,
+      originPath: resolveOriginPathSegment(fileInfo.filePath, config.paths.mediaPath),
       definition,
       resolution: definition,
       "4K": fourK,
@@ -443,7 +485,12 @@ export class NamingEngine {
 
   buildPreview(config: Configuration): NamingPreviewItem[] {
     return NAMING_PREVIEW_SAMPLES.map((sample) => {
-      const layout = this.buildLayout(sample.fileInfo, sample.data, config, sample.localState);
+      const layout = this.buildLayout(
+        previewSampleFileInfo(sample.fileInfo, config),
+        sample.data,
+        config,
+        sample.localState,
+      );
       return {
         label: sample.label,
         folder:
